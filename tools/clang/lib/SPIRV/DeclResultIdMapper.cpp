@@ -230,8 +230,8 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
   if (hlsl::IsHLSLStreamOutputType(type))
     type = hlsl::GetHLSLResourceResultType(type);
 
-  const auto *sigPoint =
-      deduceSigPoint(decl, /*asInput=*/false, shaderModel.GetKind(), forPCF);
+  const auto *sigPoint = deduceSigPoint(decl, /*asInput=*/false,
+                                        currentShaderModel->GetKind(), forPCF);
 
   // HS output variables are created using the other overload. For the rest,
   // none of them should be created as arrays.
@@ -245,7 +245,7 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
   // Write back of stage output variables in GS is manually controlled by
   // .Append() intrinsic method, implemented in writeBackOutputStream(). So
   // ignoreValue should be set to true for GS.
-  const bool noWriteBack = storedValue == 0 || shaderModel.IsGS();
+  const bool noWriteBack = storedValue == 0 || currentShaderModel->IsGS();
 
   return createStageVars(sigPoint, decl, /*asInput=*/false, type,
                          /*arraySize=*/0, "out.var", llvm::None, &storedValue,
@@ -256,7 +256,7 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
                                               uint32_t arraySize,
                                               uint32_t invocationId,
                                               uint32_t storedValue) {
-  assert(shaderModel.IsHS());
+  assert(currentShaderModel->IsHS());
 
   QualType type = getTypeOrFnRetType(decl);
 
@@ -292,7 +292,7 @@ bool DeclResultIdMapper::createStageInputVar(const ParmVarDecl *paramDecl,
   }
 
   const auto *sigPoint = deduceSigPoint(paramDecl, /*asInput=*/true,
-                                        shaderModel.GetKind(), forPCF);
+                                        currentShaderModel->GetKind(), forPCF);
 
   SemanticInfo inheritSemantic = {};
 
@@ -1092,7 +1092,8 @@ bool DeclResultIdMapper::finalizeStageIOLocations(bool forInput) {
   // likely. In order to avoid location mismatches between HS and DS, use
   // alphabetical ordering.
   if (spirvOptions.stageIoOrder == "alpha" ||
-      (!forInput && shaderModel.IsHS()) || (forInput && shaderModel.IsDS())) {
+      (!forInput && currentShaderModel->IsHS()) ||
+      (forInput && currentShaderModel->IsDS())) {
     // Sort stage input/output variables alphabetically
     std::sort(vars.begin(), vars.end(),
               [](const StageVar *a, const StageVar *b) {
@@ -1356,7 +1357,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
                                          SemanticInfo *inheritSemantic) {
   // invocationId should only be used for handling HS per-vertex output.
   if (invocationId.hasValue()) {
-    assert(shaderModel.IsHS() && arraySize != 0 && !asInput);
+    assert(currentShaderModel->IsHS() && arraySize != 0 && !asInput);
   }
 
   assert(inheritSemantic);
@@ -1409,12 +1410,12 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
 
     // Error out when the given semantic is invalid in this shader model
     if (hlsl::SigPoint::GetInterpretation(semanticKind, sigPoint->GetKind(),
-                                          shaderModel.GetMajor(),
-                                          shaderModel.GetMinor()) ==
+                                          currentShaderModel->GetMajor(),
+                                          currentShaderModel->GetMinor()) ==
         hlsl::DXIL::SemanticInterpretationKind::NA) {
       emitError("invalid usage of semantic '%0' in shader profile %1",
                 decl->getLocation())
-          << semanticToUse->str << shaderModel.GetName();
+          << semanticToUse->str << currentShaderModel->GetName();
       return false;
     }
 
@@ -1539,7 +1540,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
       theBuilder.decoratePatch(varId);
 
     // Decorate with interpolation modes for pixel shader input variables
-    if (shaderModel.IsPS() && sigPoint->IsInput() &&
+    if (currentShaderModel->IsPS() && sigPoint->IsInput() &&
         // BaryCoord*AMD buitins already encode the interpolation mode.
         semanticKind != hlsl::Semantic::Kind::Barycentrics)
       decoratePSInterpolationMode(decl, type, varId);
@@ -1872,7 +1873,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
 
 bool DeclResultIdMapper::writeBackOutputStream(const NamedDecl *decl,
                                                QualType type, uint32_t value) {
-  assert(shaderModel.IsGS()); // Only for GS use
+  assert(currentShaderModel->IsGS()); // Only for GS use
 
   if (hlsl::IsHLSLStreamOutputType(type))
     type = hlsl::GetHLSLResourceResultType(type);
@@ -1968,7 +1969,7 @@ uint32_t DeclResultIdMapper::invertYIfRequested(uint32_t position) {
 
 uint32_t DeclResultIdMapper::invertWIfRequested(uint32_t position) {
   // Reciprocate SV_Position.w if requested
-  if (spirvOptions.invertW && shaderModel.IsPS()) {
+  if (spirvOptions.invertW && currentShaderModel->IsPS()) {
     const auto f32Type = theBuilder.getFloat32Type();
     const auto v4f32Type = theBuilder.getVecType(f32Type, 4);
     const auto oldW = theBuilder.createCompositeExtract(f32Type, position, {3});
@@ -2039,7 +2040,7 @@ uint32_t DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn) {
 
   const hlsl::SigPoint *sigPoint =
       hlsl::SigPoint::GetSigPoint(hlsl::SigPointFromInputQual(
-          hlsl::DxilParamInputQual::In, shaderModel.GetKind(),
+          hlsl::DxilParamInputQual::In, currentShaderModel->GetKind(),
           /*isPatchConstant=*/false));
 
   StageVar stageVar(sigPoint, /*semaInfo=*/{}, /*builtinAttr=*/nullptr, type,
@@ -2472,7 +2473,7 @@ uint32_t DeclResultIdMapper::createSpirvStageVar(StageVar *stageVar,
 bool DeclResultIdMapper::validateVKAttributes(const NamedDecl *decl) {
   bool success = true;
   if (const auto *idxAttr = decl->getAttr<VKIndexAttr>()) {
-    if (!shaderModel.IsPS()) {
+    if (!currentShaderModel->IsPS()) {
       emitError("vk::index only allowed in pixel shader",
                 idxAttr->getLocation());
       success = false;

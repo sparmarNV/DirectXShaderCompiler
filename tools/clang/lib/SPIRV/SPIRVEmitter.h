@@ -559,6 +559,10 @@ private:
 
   static spv::ExecutionModel
   getSpirvShaderStage(const hlsl::ShaderModel &model);
+  static spv::ExecutionModel
+  getSpirvShaderStageFromName(const StringRef &model);
+  static const hlsl::ShaderModel *
+  getHLSLShaderStageFromName(const StringRef &model);
 
   void AddRequiredCapabilitiesForShaderModel();
 
@@ -927,6 +931,7 @@ private:
   /// command line and should be const.
   const llvm::StringRef entryFunctionName;
   const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
 
   SPIRVContext theContext;
   FeatureManager featureManager;
@@ -938,7 +943,16 @@ private:
   /// this queue will persist to avoid duplicated translations. And we'd like
   /// a deterministic order of iterating the queue for finding the next decl
   /// to translate. So we need SetVector here.
-  llvm::SetVector<const DeclaratorDecl *> workQueue;
+  struct FunctionEntryInfo {
+    const hlsl::ShaderModel *hlslModel;
+    spv::ExecutionModel executionModel;
+    uint32_t entryFunctionId;
+    const DeclaratorDecl *funcDecl;
+  };
+  const FunctionEntryInfo *currentEntry;
+
+  llvm::SmallVector<FunctionEntryInfo, 8> workQueue;
+  llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;
 
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.

@@ -356,6 +356,9 @@ public:
 
   /// \brief Sets the <result-id> of the entry function.
   void setEntryFunctionId(uint32_t id) { entryFunctionId = id; }
+  void setCurrentShaderModel(const hlsl::ShaderModel *sModel) {
+    currentShaderModel = sModel;
+  }
 
 private:
   /// The struct containing SPIR-V information of a AST Decl.
@@ -630,6 +633,7 @@ private:
 
 private:
   const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
   ModuleBuilder &theBuilder;
   SPIRVEmitter &theEmitter;
   const SpirvCodeGenOptions &spirvOptions;
@@ -750,8 +754,8 @@ DeclResultIdMapper::DeclResultIdMapper(
     const hlsl::ShaderModel &model, ASTContext &context, ModuleBuilder &builder,
     SPIRVEmitter &emitter, TypeTranslator &translator, FeatureManager &features,
     const SpirvCodeGenOptions &options)
-    : shaderModel(model), theBuilder(builder), theEmitter(emitter),
-      spirvOptions(options), astContext(context),
+    : shaderModel(model), currentShaderModel(&model), theBuilder(builder),
+      theEmitter(emitter), spirvOptions(options), astContext(context),
       diags(context.getDiagnostics()), typeTranslator(translator),
       entryFunctionId(0), laneCountBuiltinId(0), laneIndexBuiltinId(0),
       needsLegalization(false),
