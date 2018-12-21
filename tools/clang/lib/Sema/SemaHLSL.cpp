@@ -1573,24 +1573,26 @@ const char* g_ArBasicTypeNames[] =
 
 C_ASSERT(_countof(g_ArBasicTypeNames) == AR_BASIC_MAXIMUM_COUNT);
 
+static bool IsValidBasicKind(ArBasicKind kind) {
+  return kind != AR_BASIC_COUNT &&
+    kind != AR_BASIC_NONE &&
+    kind != AR_BASIC_UNKNOWN &&
+    kind != AR_BASIC_NOCAST &&
+    kind != AR_BASIC_POINTER &&
+    kind != AR_OBJECT_RENDERTARGETVIEW &&
+    kind != AR_OBJECT_DEPTHSTENCILVIEW &&
+    kind != AR_OBJECT_COMPUTESHADER &&
+    kind != AR_OBJECT_DOMAINSHADER &&
+    kind != AR_OBJECT_GEOMETRYSHADER &&
+    kind != AR_OBJECT_HULLSHADER &&
+    kind != AR_OBJECT_PIXELSHADER &&
+    kind != AR_OBJECT_VERTEXSHADER &&
+    kind != AR_OBJECT_PIXELFRAGMENT &&
+    kind != AR_OBJECT_VERTEXFRAGMENT;
+}
 // kind should never be a flag value or effects framework type - we simply do not expect to deal with these
 #define DXASSERT_VALIDBASICKIND(kind) \
-  DXASSERT(\
-  kind != AR_BASIC_COUNT && \
-  kind != AR_BASIC_NONE && \
-  kind != AR_BASIC_UNKNOWN && \
-  kind != AR_BASIC_NOCAST && \
-  kind != AR_BASIC_POINTER && \
-  kind != AR_OBJECT_RENDERTARGETVIEW && \
-  kind != AR_OBJECT_DEPTHSTENCILVIEW && \
-  kind != AR_OBJECT_COMPUTESHADER && \
-  kind != AR_OBJECT_DOMAINSHADER && \
-  kind != AR_OBJECT_GEOMETRYSHADER && \
-  kind != AR_OBJECT_HULLSHADER && \
-  kind != AR_OBJECT_PIXELSHADER && \
-  kind != AR_OBJECT_VERTEXSHADER && \
-  kind != AR_OBJECT_PIXELFRAGMENT && \
-  kind != AR_OBJECT_VERTEXFRAGMENT, "otherwise caller is using a special flag or an unsupported kind value");
+  DXASSERT(IsValidBasicKind(kind), "otherwise caller is using a special flag or an unsupported kind value");
 
 static
 const char* g_DeprecatedEffectObjectNames[] =
@@ -2420,6 +2422,7 @@ static CXXRecordDecl *CreateRayDescStruct(clang::ASTContext &context,
   CXXRecordDecl *rayDescDecl = CXXRecordDecl::Create(
       context, TagTypeKind::TTK_Struct, currentDeclContext, NoLoc, NoLoc,
       &rayDesc, nullptr, DelayTypeCreationTrue);
+  rayDescDecl->addAttr(FinalAttr::CreateImplicit(context, FinalAttr::Keyword_final));
   rayDescDecl->startDefinition();
 
   QualType floatTy = context.FloatTy;
@@ -2451,6 +2454,7 @@ static CXXRecordDecl *AddBuiltInTriangleIntersectionAttributes(ASTContext& conte
     CXXRecordDecl *attributesDecl = CXXRecordDecl::Create(
         context, TagTypeKind::TTK_Struct, curDC, NoLoc, NoLoc,
         &attributesId, nullptr, DelayTypeCreationTrue);
+    attributesDecl->addAttr(FinalAttr::CreateImplicit(context, FinalAttr::Keyword_final));
     attributesDecl->startDefinition();
     // float2 barycentrics;
     CreateSimpleField(context, attributesDecl, "barycentrics", baryType);
@@ -2467,6 +2471,7 @@ static CXXRecordDecl *StartSubobjectDecl(ASTContext& context, const char *name) 
   IdentifierInfo &id = context.Idents.get(StringRef(name), tok::TokenKind::identifier);
   CXXRecordDecl *decl = CXXRecordDecl::Create( context, TagTypeKind::TTK_Struct, 
     context.getTranslationUnitDecl(), NoLoc, NoLoc, &id, nullptr, DelayTypeCreationTrue);
+  decl->addAttr(FinalAttr::CreateImplicit(context, FinalAttr::Keyword_final));
   decl->startDefinition();
   return decl;
 }
@@ -5579,7 +5584,10 @@ bool HLSLExternalSource::MatchArguments(
           return false;
         }
         pEltType = GetTypeElementKind(objectElement);
-        DXASSERT_VALIDBASICKIND(pEltType);
+        if (!IsValidBasicKind(pEltType)) {
+          // This can happen with Texture2D<Struct> or other invalid declarations
+          return false;
+        }
       }
       else {
         pEltType = ComponentType[pArgument->uComponentTypeId];
@@ -9018,16 +9026,13 @@ Sema::TemplateDeductionResult HLSLExternalSource::DeduceTemplateArgumentsForHLSL
           !IsBABLoad
               ? diag::err_hlsl_intrinsic_template_arg_unsupported
               : !Is2018 ? diag::err_hlsl_intrinsic_template_arg_requires_2018
-                        : diag::err_hlsl_intrinsic_template_arg_requires_2018;
+                        : diag::err_hlsl_intrinsic_template_arg_scalar_vector;
       if (IsBABLoad && Is2018 && ExplicitTemplateArgs->size() == 1) {
         Loc = (*ExplicitTemplateArgs)[0].getLocation();
         QualType explicitType = (*ExplicitTemplateArgs)[0].getArgument().getAsType();
         ArTypeObjectKind explicitKind = GetTypeObjectKind(explicitType);
         if (explicitKind == AR_TOBJ_BASIC || explicitKind == AR_TOBJ_VECTOR) {
-          isLegalTemplate = GET_BASIC_BITS(GetTypeElementKind(explicitType)) != BPROP_BITS64 ||
-            GetNumElements(explicitType) <= 2;
-        }
-        if (isLegalTemplate) {
+          isLegalTemplate = true;
           argTypes[0] = explicitType;
         }
       }
@@ -9047,15 +9052,6 @@ Sema::TemplateDeductionResult HLSLExternalSource::DeduceTemplateArgumentsForHLSL
         }
         argTypes[2] = getSema()->getASTContext().getIntTypeForBitwidth(
             32, /*signed*/ false);
-      } else {
-        // not supporting types > 16 bytes yet.
-        if (GET_BASIC_BITS(GetTypeElementKind(argTypes[2])) == BPROP_BITS64 &&
-            GetNumElements(argTypes[2]) > 2) {
-          getSema()->Diag(Args[1]->getLocStart(),
-                          diag::err_ovl_no_viable_member_function_in_call)
-              << intrinsicName;
-          return Sema::TemplateDeductionResult::TDK_Invalid;
-        }
       }
     }
     Specialization = AddHLSLIntrinsicMethod(cursor.GetTableName(), cursor.GetLoweringStrategy(), *cursor, FunctionTemplate, Args, argTypes, argCount);

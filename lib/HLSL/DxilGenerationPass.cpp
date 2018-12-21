@@ -160,26 +160,30 @@ void InitDxilModuleFromHLModule(HLModule &H, DxilModule &M, bool HasDebugInfo) {
     auto b = llvm::make_unique<DxilCBuffer>();
     InitResourceBase(C.get(), b.get());
     b->SetSize(C->GetSize());
-    LLVMUsed.emplace_back(cast<GlobalVariable>(b->GetGlobalSymbol()));
+    if (GlobalVariable *GV = dyn_cast<GlobalVariable>(b->GetGlobalSymbol()))
+      LLVMUsed.emplace_back(GV);
     M.AddCBuffer(std::move(b));
   }
   for (auto && C : H.GetUAVs()) {
     auto b = llvm::make_unique<DxilResource>();
     InitResource(C.get(), b.get());
-    LLVMUsed.emplace_back(cast<GlobalVariable>(b->GetGlobalSymbol()));
+    if (GlobalVariable *GV = dyn_cast<GlobalVariable>(b->GetGlobalSymbol()))
+      LLVMUsed.emplace_back(GV);
     M.AddUAV(std::move(b));
   }
   for (auto && C : H.GetSRVs()) {
     auto b = llvm::make_unique<DxilResource>();
     InitResource(C.get(), b.get());
-    LLVMUsed.emplace_back(cast<GlobalVariable>(b->GetGlobalSymbol()));
+    if (GlobalVariable *GV = dyn_cast<GlobalVariable>(b->GetGlobalSymbol()))
+      LLVMUsed.emplace_back(GV);
     M.AddSRV(std::move(b));
   }
   for (auto && C : H.GetSamplers()) {
     auto b = llvm::make_unique<DxilSampler>();
     InitResourceBase(C.get(), b.get());
     b->SetSamplerKind(C->GetSamplerKind());
-    LLVMUsed.emplace_back(cast<GlobalVariable>(b->GetGlobalSymbol()));
+    if (GlobalVariable *GV = dyn_cast<GlobalVariable>(b->GetGlobalSymbol()))
+      LLVMUsed.emplace_back(GV);
     M.AddSampler(std::move(b));
   }
 
@@ -192,6 +196,7 @@ void InitDxilModuleFromHLModule(HLModule &H, DxilModule &M, bool HasDebugInfo) {
   // Shader properties.
   //bool m_bDisableOptimizations;
   M.SetDisableOptimization(H.GetHLOptions().bDisableOptimizations);
+  M.SetLegacyResourceReservation(H.GetHLOptions().bLegacyResourceReservation);
   //bool m_bDisableMathRefactoring;
   //bool m_bEnableDoublePrecision;
   //bool m_bEnableDoubleExtensions;
@@ -416,8 +421,8 @@ MarkUavUpdateCounter(Value* LoadOrGEP,
 static void
 MarkUavUpdateCounter(DxilResource &res,
                      std::unordered_set<LoadInst *> &UpdateCounterSet) {
-  Value *GV = res.GetGlobalSymbol();
-  for (auto U = GV->user_begin(), E = GV->user_end(); U != E;) {
+  Value *V = res.GetGlobalSymbol();
+  for (auto U = V->user_begin(), E = V->user_end(); U != E;) {
     User *user = *(U++);
     // Skip unused user.
     if (user->user_empty())
@@ -443,7 +448,10 @@ void DxilGenerationPass::GenerateDxilCBufferHandles() {
 
   for (size_t i = 0; i < m_pHLModule->GetCBuffers().size(); i++) {
     DxilCBuffer &CB = m_pHLModule->GetCBuffer(i);
-    GlobalVariable *GV = cast<GlobalVariable>(CB.GetGlobalSymbol());
+    GlobalVariable *GV = dyn_cast<GlobalVariable>(CB.GetGlobalSymbol());
+    if (GV == nullptr)
+      continue;
+
     // Remove GEP created in HLObjectOperationLowerHelper::UniformCbPtr.
     GV->removeDeadConstantUsers();
     std::string handleName = std::string(GV->getName());
@@ -1404,8 +1412,17 @@ void DxilTranslateRawBuffer::ReplaceRawBufferLoad64Bit(Function *F, Type *EltTy,
       for (unsigned i = 0; i < size; i++) {
         if (i == 2) {
           // Update offset 4 by 4 bytes.
-          args[DXIL::OperandIndex::kRawBufferLoadElementOffsetOpIdx] =
+          if (isa<UndefValue>(offset)) {
+            // [RW]ByteAddressBuffer has undef element offset -> update index
+            Value *index = CI->getArgOperand(DXIL::OperandIndex::kRawBufferLoadIndexOpIdx);
+            args[DXIL::OperandIndex::kRawBufferLoadIndexOpIdx] =
+              Builder.CreateAdd(index, Builder.getInt32(4 * 4));
+          }
+          else {
+            // [RW]StructuredBuffer -> update element offset
+            args[DXIL::OperandIndex::kRawBufferLoadElementOffsetOpIdx] =
               Builder.CreateAdd(offset, Builder.getInt32(4 * 4));
+          }
           args[DXIL::OperandIndex::kRawBufferLoadMaskOpIdx] =
               Builder.getInt8(maskHi);
           newLd = Builder.CreateCall(bufLd, args);
@@ -1523,10 +1540,20 @@ void DxilTranslateRawBuffer::ReplaceRawBufferStore64Bit(Function *F, Type *ETy,
       Builder.CreateCall(newFunction, args);
 
       if (maskHi) {
-        Value *offset = args[DXIL::OperandIndex::kBufferStoreCoord1OpIdx];
         // Update offset 4 by 4 bytes.
-        offset = Builder.CreateAdd(offset, Builder.getInt32(4 * 4));
-        args[DXIL::OperandIndex::kRawBufferStoreElementOffsetOpIdx] = offset;
+        Value *offset = args[DXIL::OperandIndex::kBufferStoreCoord1OpIdx];
+        if (isa<UndefValue>(offset)) {
+          // [RW]ByteAddressBuffer has element offset == undef -> update index instead
+          Value *index = args[DXIL::OperandIndex::kBufferStoreCoord0OpIdx];
+          index = Builder.CreateAdd(index, Builder.getInt32(4 * 4));
+          args[DXIL::OperandIndex::kRawBufferStoreIndexOpIdx] = index;
+        }
+        else {
+          // [RW]StructuredBuffer -> update element offset
+          offset = Builder.CreateAdd(offset, Builder.getInt32(4 * 4));
+          args[DXIL::OperandIndex::kRawBufferStoreElementOffsetOpIdx] = offset;
+        }
+        
         args[DXIL::OperandIndex::kRawBufferStoreMaskOpIdx] =
             Builder.getInt8(maskHi);
         args[DXIL::OperandIndex::kRawBufferStoreVal0OpIdx] = vals32[4];

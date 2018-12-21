@@ -88,6 +88,7 @@ TEST_F(FileTest, StructuredBufferType) {
   runFileTest("type.structured-buffer.hlsl");
 }
 TEST_F(FileTest, StructuredByteBufferArray) {
+  setRelaxLogicalPointer();
   runFileTest("type.structured-buffer.array.hlsl");
 }
 TEST_F(FileTest, StructuredByteBufferArrayError) {
@@ -1621,6 +1622,12 @@ TEST_F(FileTest, VulkanLayoutFxcRulesCBuffer1) {
   // cbuffer/tbuffer/ConstantBuffer/TextureBuffer with fxc layout rules
   setDxLayout();
   runFileTest("vk.layout.cbuffer.fxc.1.hlsl");
+}
+
+TEST_F(FileTest, VulkanLayoutCBufferScalar) {
+  // VK_EXT_scalar_block_layout
+  setScalarLayout();
+  runFileTest("vk.layout.cbuffer.scalar.hlsl");
 }
 
 TEST_F(FileTest, VulkanSubpassInput) { runFileTest("vk.subpass-input.hlsl"); }

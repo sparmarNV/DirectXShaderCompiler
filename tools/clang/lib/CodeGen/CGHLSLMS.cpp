@@ -391,6 +391,7 @@ CGMSHLSLRuntime::CGMSHLSLRuntime(CodeGenModule &CGM)
   opts.bLegacyCBufferLoad = !CGM.getCodeGenOpts().HLSLNotUseLegacyCBufLoad;
   opts.bAllResourcesBound = CGM.getCodeGenOpts().HLSLAllResourcesBound;
   opts.PackingStrategy = CGM.getCodeGenOpts().HLSLSignaturePackingStrategy;
+  opts.bLegacyResourceReservation = CGM.getCodeGenOpts().HLSLLegacyResourceReservation;
 
   opts.bUseMinPrecision = CGM.getLangOpts().UseMinPrecision;
   opts.bDX9CompatMode = CGM.getLangOpts().EnableDX9CompatMode;
@@ -572,26 +573,15 @@ static unsigned AlignBaseOffset(unsigned baseOffset, unsigned size,
   bool needNewAlign = Ty->isArrayType();
 
   if (IsHLSLMatType(Ty)) {
-    bool bColMajor = !bDefaultRowMajor;
-    if (const AttributedType *AT = dyn_cast<AttributedType>(Ty)) {
-      switch (AT->getAttrKind()) {
-      case AttributedType::Kind::attr_hlsl_column_major:
-        bColMajor = true;
-        break;
-      case AttributedType::Kind::attr_hlsl_row_major:
-        bColMajor = false;
-        break;
-      default:
-        // Do nothing
-        break;
-      }
-    }
+    bool bRowMajor = false;
+    if (!hlsl::HasHLSLMatOrientation(Ty, &bRowMajor))
+      bRowMajor = bDefaultRowMajor;
 
     unsigned row, col;
     hlsl::GetHLSLMatRowColCount(Ty, row, col);
 
-    needNewAlign |= bColMajor && col > 1;
-    needNewAlign |= !bColMajor && row > 1;
+    needNewAlign |= !bRowMajor && col > 1;
+    needNewAlign |= bRowMajor && row > 1;
   }
 
   unsigned scalarSizeInBytes = 4;
@@ -628,20 +618,9 @@ static unsigned AlignBaseOffset(QualType Ty, unsigned baseOffset,
 
 static unsigned GetMatrixSizeInCB(QualType Ty, bool defaultRowMajor,
                                   bool b64Bit) {
-  bool bColMajor = !defaultRowMajor;
-  if (const AttributedType *AT = dyn_cast<AttributedType>(Ty)) {
-    switch (AT->getAttrKind()) {
-    case AttributedType::Kind::attr_hlsl_column_major:
-      bColMajor = true;
-      break;
-    case AttributedType::Kind::attr_hlsl_row_major:
-      bColMajor = false;
-      break;
-    default:
-      // Do nothing
-      break;
-    }
-  }
+  bool bRowMajor;
+  if (!hlsl::HasHLSLMatOrientation(Ty, &bRowMajor))
+    bRowMajor = defaultRowMajor;
 
   unsigned row, col;
   hlsl::GetHLSLMatRowColCount(Ty, row, col);
@@ -651,19 +630,19 @@ static unsigned GetMatrixSizeInCB(QualType Ty, bool defaultRowMajor,
   // Align to 4 * 4bytes.
   unsigned alignment = 4 * 4;
 
-  if (bColMajor) {
+  if (bRowMajor) {
+    unsigned rowSize = EltSize * col;
+    // 3x64bit or 4x64bit align to 32 bytes.
+    if (rowSize > alignment)
+      alignment <<= 1;
+    return alignment * (row - 1) + col * EltSize;
+  } else {
     unsigned rowSize = EltSize * row;
     // 3x64bit or 4x64bit align to 32 bytes.
     if (rowSize > alignment)
       alignment <<= 1;
 
     return alignment * (col - 1) + row * EltSize;
-  } else {
-    unsigned rowSize = EltSize * col;
-    // 3x64bit or 4x64bit align to 32 bytes.
-    if (rowSize > alignment)
-      alignment <<= 1;
-    return alignment * (row - 1) + col * EltSize;
   }
 }
 
@@ -2346,6 +2325,31 @@ hlsl::DxilResourceBase::Class CGMSHLSLRuntime::TypeToClass(clang::QualType Ty) {
   return hlsl::GetResourceClassForType(CGM.getContext(), Ty);
 }
 
+namespace {
+  void GetResourceDeclElemTypeAndRangeSize(CodeGenModule &CGM, HLModule &HL, VarDecl &VD,
+    QualType &ElemType, unsigned& rangeSize) {
+    ElemType = VD.getType().getCanonicalType();
+    rangeSize = 1;
+    while (const clang::ArrayType *arrayType = CGM.getContext().getAsArrayType(ElemType)) {
+      if (rangeSize != UINT_MAX) {
+        if (arrayType->isConstantArrayType()) {
+          rangeSize *= cast<ConstantArrayType>(arrayType)->getSize().getLimitedValue();
+        }
+        else {
+          if (HL.GetHLOptions().bLegacyResourceReservation) {
+            DiagnosticsEngine &Diags = CGM.getDiags();
+            unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Error,
+              "unbounded resources are not supported with -flegacy-resource-reservation");
+            Diags.Report(VD.getLocation(), DiagID);
+          }
+          rangeSize = UINT_MAX;
+        }
+      }
+      ElemType = arrayType->getElementType();
+    }
+  }
+}
+
 uint32_t CGMSHLSLRuntime::AddSampler(VarDecl *samplerDecl) {
   llvm::GlobalVariable *val =
     cast<llvm::GlobalVariable>(CGM.GetAddrOfGlobalVar(samplerDecl));
@@ -2354,34 +2358,12 @@ uint32_t CGMSHLSLRuntime::AddSampler(VarDecl *samplerDecl) {
   hlslRes->SetLowerBound(UINT_MAX);
   hlslRes->SetGlobalSymbol(val);
   hlslRes->SetGlobalName(samplerDecl->getName());
-  QualType VarTy = samplerDecl->getType();
-  if (const clang::ArrayType *arrayType =
-          CGM.getContext().getAsArrayType(VarTy)) {
-    if (arrayType->isConstantArrayType()) {
-      uint32_t arraySize =
-          cast<ConstantArrayType>(arrayType)->getSize().getLimitedValue();
-      hlslRes->SetRangeSize(arraySize);
-    } else {
-      hlslRes->SetRangeSize(UINT_MAX);
-    }
-    // use elementTy
-    VarTy = arrayType->getElementType();
-    // Support more dim.
-    while (const clang::ArrayType *arrayType =
-               CGM.getContext().getAsArrayType(VarTy)) {
-      unsigned rangeSize = hlslRes->GetRangeSize();
-      if (arrayType->isConstantArrayType()) {
-        uint32_t arraySize =
-            cast<ConstantArrayType>(arrayType)->getSize().getLimitedValue();
-        if (rangeSize != UINT_MAX)
-          hlslRes->SetRangeSize(rangeSize * arraySize);
-      } else
-        hlslRes->SetRangeSize(UINT_MAX);
-      // use elementTy
-      VarTy = arrayType->getElementType();
-    }
-  } else
-    hlslRes->SetRangeSize(1);
+
+  QualType VarTy;
+  unsigned rangeSize;
+  GetResourceDeclElemTypeAndRangeSize(CGM, *m_pHLModule, *samplerDecl,
+    VarTy, rangeSize);
+  hlslRes->SetRangeSize(rangeSize);
 
   const RecordType *RT = VarTy->getAs<RecordType>();
   DxilSampler::SamplerKind kind = KeywordToSamplerKind(RT->getDecl()->getName());
@@ -2642,11 +2624,25 @@ bool CGMSHLSLRuntime::SetUAVSRV(SourceLocation loc,
   if (kind == hlsl::DxilResource::Kind::Texture2DMS ||
       kind == hlsl::DxilResource::Kind::Texture2DMSArray) {
     const ClassTemplateSpecializationDecl *templateDecl =
-        dyn_cast<ClassTemplateSpecializationDecl>(RD);
+        cast<ClassTemplateSpecializationDecl>(RD);
     const clang::TemplateArgument &sampleCountArg =
         templateDecl->getTemplateArgs()[1];
     uint32_t sampleCount = sampleCountArg.getAsIntegral().getLimitedValue();
     hlslRes->SetSampleCount(sampleCount);
+  }
+
+  if (hlsl::DxilResource::IsAnyTexture(kind)) {
+    const ClassTemplateSpecializationDecl *templateDecl = cast<ClassTemplateSpecializationDecl>(RD);
+    const clang::TemplateArgument &texelTyArg = templateDecl->getTemplateArgs()[0];
+    llvm::Type *texelTy = CGM.getTypes().ConvertType(texelTyArg.getAsType());
+    if (!texelTy->isFloatingPointTy() && !texelTy->isIntegerTy()
+      && !hlsl::IsHLSLVecType(texelTyArg.getAsType())) {
+      DiagnosticsEngine &Diags = CGM.getDiags();
+      unsigned DiagID = Diags.getCustomDiagID(DiagnosticsEngine::Error,
+        "texture resource texel type must be scalar or vector");
+      Diags.Report(loc, DiagID);
+      return false;
+    }
   }
 
   if (kind != hlsl::DxilResource::Kind::StructuredBuffer) {
@@ -2693,25 +2689,11 @@ bool CGMSHLSLRuntime::SetUAVSRV(SourceLocation loc,
 
     EltTy = EltTy.getCanonicalType();
     bool bSNorm = false;
-    bool bUNorm = false;
-
-    if (const AttributedType *AT = dyn_cast<AttributedType>(Ty)) {
-      switch (AT->getAttrKind()) {
-      case AttributedType::Kind::attr_hlsl_snorm:
-        bSNorm = true;
-        break;
-      case AttributedType::Kind::attr_hlsl_unorm:
-        bUNorm = true;
-        break;
-      default:
-        // Do nothing
-        break;
-      }
-    }
+    bool bHasNormAttribute = hlsl::HasHLSLUNormSNorm(Ty, &bSNorm);
 
     if (EltTy->isBuiltinType()) {
       const BuiltinType *BTy = EltTy->getAs<BuiltinType>();
-      CompType::Kind kind = BuiltinTyToCompTy(BTy, bSNorm, bUNorm);
+      CompType::Kind kind = BuiltinTyToCompTy(BTy, bHasNormAttribute && bSNorm, bHasNormAttribute && !bSNorm);
       // 64bits types are implemented with u32.
       if (kind == CompType::Kind::U64 || kind == CompType::Kind::I64 ||
           kind == CompType::Kind::SNormF64 ||
@@ -2720,7 +2702,7 @@ bool CGMSHLSLRuntime::SetUAVSRV(SourceLocation loc,
       }
       hlslRes->SetCompType(kind);
     } else {
-      DXASSERT(!bSNorm && !bUNorm, "snorm/unorm on invalid type");
+      DXASSERT(!bHasNormAttribute, "snorm/unorm on invalid type");
     }
   }
 
@@ -2729,7 +2711,7 @@ bool CGMSHLSLRuntime::SetUAVSRV(SourceLocation loc,
   if (kind == hlsl::DxilResource::Kind::TypedBuffer ||
       kind == hlsl::DxilResource::Kind::StructuredBuffer) {
     const ClassTemplateSpecializationDecl *templateDecl =
-        dyn_cast<ClassTemplateSpecializationDecl>(RD);
+        cast<ClassTemplateSpecializationDecl>(RD);
 
     const clang::TemplateArgument &retTyArg =
         templateDecl->getTemplateArgs()[0];
@@ -2763,38 +2745,16 @@ uint32_t CGMSHLSLRuntime::AddUAVSRV(VarDecl *decl,
   llvm::GlobalVariable *val =
       cast<llvm::GlobalVariable>(CGM.GetAddrOfGlobalVar(decl));
 
-  QualType VarTy = decl->getType().getCanonicalType();
-
   unique_ptr<HLResource> hlslRes(new HLResource);
   hlslRes->SetLowerBound(UINT_MAX);
   hlslRes->SetGlobalSymbol(val);
   hlslRes->SetGlobalName(decl->getName());
-  if (const clang::ArrayType *arrayType =
-          CGM.getContext().getAsArrayType(VarTy)) {
-    if (arrayType->isConstantArrayType()) {
-      uint32_t arraySize =
-          cast<ConstantArrayType>(arrayType)->getSize().getLimitedValue();
-      hlslRes->SetRangeSize(arraySize);
-    } else
-      hlslRes->SetRangeSize(UINT_MAX);
-    // use elementTy
-    VarTy = arrayType->getElementType();
-    // Support more dim.
-    while (const clang::ArrayType *arrayType =
-               CGM.getContext().getAsArrayType(VarTy)) {
-      unsigned rangeSize = hlslRes->GetRangeSize();
-      if (arrayType->isConstantArrayType()) {
-        uint32_t arraySize =
-            cast<ConstantArrayType>(arrayType)->getSize().getLimitedValue();
-        if (rangeSize != UINT_MAX)
-          hlslRes->SetRangeSize(rangeSize * arraySize);
-      } else
-        hlslRes->SetRangeSize(UINT_MAX);
-      // use elementTy
-      VarTy = arrayType->getElementType();
-    }
-  } else
-    hlslRes->SetRangeSize(1);
+
+  QualType VarTy;
+  unsigned rangeSize;
+  GetResourceDeclElemTypeAndRangeSize(CGM, *m_pHLModule, *decl,
+    VarTy, rangeSize);
+  hlslRes->SetRangeSize(rangeSize);
 
   for (hlsl::UnusualAnnotation *it : decl->getUnusualAnnotations()) {
     switch (it->getKind()) {
@@ -3878,6 +3838,15 @@ static Value *CastLdValue(Value *Ptr, llvm::Type *FromTy, llvm::Type *ToTy, IRBu
       // Change scalar into vec1.
       Value *Vec1 = UndefValue::get(ToTy);
       return Builder.CreateInsertElement(Vec1, V, (uint64_t)0);
+    } else if (vecSize == 1 && FromTy->isIntegerTy()
+      && ToTy->getVectorElementType()->isIntegerTy(1)) {
+      // load(bitcast i32* to <1 x i1>*)
+      // Rewrite to
+      // insertelement(icmp ne (load i32*), 0)
+      Value *IntV = Builder.CreateLoad(Ptr);
+      Value *BoolV = Builder.CreateICmpNE(IntV, ConstantInt::get(IntV->getType(), 0), "tobool");
+      Value *Vec1 = UndefValue::get(ToTy);
+      return Builder.CreateInsertElement(Vec1, BoolV, (uint64_t)0);
     } else if (FromTy->isVectorTy() && vecSize == 1) {
       Value *V = Builder.CreateLoad(Ptr);
       // VectorTrunc
@@ -5508,15 +5477,20 @@ static void AddMissingCastOpsInInitList(SmallVector<Value *, 4> &elts, SmallVect
 
 static void StoreInitListToDestPtr(Value *DestPtr,
                                    SmallVector<Value *, 4> &elts, unsigned &idx,
-                                   QualType Type, CodeGenTypes &Types, bool bDefaultRowMajor,
-                                   CGBuilderTy &Builder, llvm::Module &M) {
+                                   QualType Type, bool bDefaultRowMajor,
+                                   CodeGenFunction &CGF, llvm::Module &M) {
+  CodeGenTypes &Types = CGF.getTypes();
+  CGBuilderTy &Builder = CGF.Builder;
+
   llvm::Type *Ty = DestPtr->getType()->getPointerElementType();
   llvm::Type *i32Ty = llvm::Type::getInt32Ty(Ty->getContext());
 
   if (Ty->isVectorTy()) {
-    Value *Result = UndefValue::get(Ty);
-    for (unsigned i = 0; i < Ty->getVectorNumElements(); i++)
+    llvm::Type *RegTy = CGF.ConvertType(Type);
+    Value *Result = UndefValue::get(RegTy);
+    for (unsigned i = 0; i < RegTy->getVectorNumElements(); i++)
       Result = Builder.CreateInsertElement(Result, elts[idx + i], i);
+    Result = CGF.EmitToMemory(Result, Type);
     Builder.CreateStore(Result, DestPtr);
     idx += Ty->getVectorNumElements();
   } else if (HLMatrixLower::IsMatrixType(Ty)) {
@@ -5581,8 +5555,8 @@ static void StoreInitListToDestPtr(Value *DestPtr,
             unsigned i = RL.getNonVirtualBaseLLVMFieldNo(BaseDecl);
             Constant *gepIdx = ConstantInt::get(i32Ty, i);
             Value *GEP = Builder.CreateInBoundsGEP(DestPtr, {zero, gepIdx});
-            StoreInitListToDestPtr(GEP, elts, idx, parentTy, Types,
-                                   bDefaultRowMajor, Builder, M);
+            StoreInitListToDestPtr(GEP, elts, idx, parentTy,
+                                   bDefaultRowMajor, CGF, M);
           }
         }
       }
@@ -5590,8 +5564,8 @@ static void StoreInitListToDestPtr(Value *DestPtr,
         unsigned i = RL.getLLVMFieldNo(field);
         Constant *gepIdx = ConstantInt::get(i32Ty, i);
         Value *GEP = Builder.CreateInBoundsGEP(DestPtr, {zero, gepIdx});
-        StoreInitListToDestPtr(GEP, elts, idx, field->getType(), Types,
-                               bDefaultRowMajor, Builder, M);
+        StoreInitListToDestPtr(GEP, elts, idx, field->getType(),
+                               bDefaultRowMajor, CGF, M);
       }
     }
   } else if (Ty->isArrayTy()) {
@@ -5600,8 +5574,8 @@ static void StoreInitListToDestPtr(Value *DestPtr,
     for (unsigned i = 0; i < Ty->getArrayNumElements(); i++) {
       Constant *gepIdx = ConstantInt::get(i32Ty, i);
       Value *GEP = Builder.CreateInBoundsGEP(DestPtr, {zero, gepIdx});
-      StoreInitListToDestPtr(GEP, elts, idx, EltType, Types, bDefaultRowMajor,
-                             Builder, M);
+      StoreInitListToDestPtr(GEP, elts, idx, EltType, bDefaultRowMajor,
+                             CGF, M);
     }
   } else {
     DXASSERT(Ty->isSingleValueType(), "invalid type");
@@ -5781,8 +5755,8 @@ Value *CGMSHLSLRuntime::EmitHLSLInitListExpr(CodeGenFunction &CGF, InitListExpr 
     ParamList.append(EltValList.begin(), EltValList.end());
     idx = 0;
     bool bDefaultRowMajor = m_pHLModule->GetHLOptions().bDefaultRowMajor;
-    StoreInitListToDestPtr(DestPtr, EltValList, idx, ResultTy, CGF.getTypes(),
-                           bDefaultRowMajor, CGF.Builder, TheModule);
+    StoreInitListToDestPtr(DestPtr, EltValList, idx, ResultTy,
+                           bDefaultRowMajor, CGF, TheModule);
     return nullptr;
   }
 
@@ -7117,15 +7091,10 @@ void CGMSHLSLRuntime::EmitHLSLOutParamConversionInit(
     BasicBlock *InsertBlock = CGF.Builder.GetInsertBlock();
     Function *F = InsertBlock->getParent();
 
-    if (ParamTy->isBooleanType()) {
-      // Create i32 for bool.
-      ParamTy = CGM.getContext().IntTy;
-    }
     // Make sure the alloca is in entry block to stop inline create stacksave.
     IRBuilder<> AllocaBuilder(dxilutil::FindAllocaInsertionPt(F));
-    tmpArgAddr = AllocaBuilder.CreateAlloca(CGF.ConvertType(ParamTy));
+    tmpArgAddr = AllocaBuilder.CreateAlloca(CGF.ConvertTypeForMem(ParamTy));
 
-      
     // add it to local decl map
     TmpArgMap(tmpArg, tmpArgAddr);
 
@@ -7203,6 +7172,8 @@ void CGMSHLSLRuntime::EmitHLSLOutParamConversionCopyBack(
           outVal = CGF.Builder.CreateLoad(tmpArgAddr);
         else
           outVal = EmitHLSLMatrixLoad(CGF, tmpArgAddr, ParamTy);
+
+        outVal = CGF.EmitFromMemory(outVal, ParamTy);
 
         llvm::Type *ToTy = CGF.ConvertType(ArgTy);
         llvm::Type *FromTy = outVal->getType();

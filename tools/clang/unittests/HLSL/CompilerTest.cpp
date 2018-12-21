@@ -231,9 +231,7 @@ public:
   TEST_METHOD(CompileWhenODumpThenOptimizerMatch)
   TEST_METHOD(CompileWhenVdThenProducesDxilContainer)
 
-#ifndef DXC_ON_APPVEYOR_CI
   TEST_METHOD(CompileWhenNoMemThenOOM)
-#endif // DXC_ON_APPVEYOR_CI
   TEST_METHOD(CompileWhenShaderModelMismatchAttributeThenFail)
   TEST_METHOD(CompileBadHlslThenFail)
   TEST_METHOD(CompileLegacyShaderModelThenFail)
@@ -925,6 +923,7 @@ public:
   TEST_METHOD(CodeGenDx12MiniEngineParticlesortindirectargscs)
   TEST_METHOD(CodeGenDx12MiniEngineParticlespawncs)
   TEST_METHOD(CodeGenDx12MiniEngineParticletilecullingcs)
+  TEST_METHOD(CodeGenDx12MiniEngineParticletilecullingcs_fail_unroll)
   TEST_METHOD(CodeGenDx12MiniEngineParticletilerendercs)
   TEST_METHOD(CodeGenDx12MiniEngineParticletilerenderfastcs)
   TEST_METHOD(CodeGenDx12MiniEngineParticletilerenderfastdynamiccs)
@@ -953,6 +952,7 @@ public:
   TEST_METHOD(ViewID)
   TEST_METHOD(SubobjectCodeGenErrors)
   TEST_METHOD(ShaderCompatSuite)
+  TEST_METHOD(Unroll)
   TEST_METHOD(QuickTest)
   TEST_METHOD(QuickLlTest)
   BEGIN_TEST_METHOD(SingleFileCheckTest)
@@ -2580,7 +2580,6 @@ public:
   }
 };
 
-#ifndef DXC_ON_APPVEYOR_CI
 TEST_F(CompilerTest, CompileWhenNoMemThenOOM) {
   WEX::TestExecution::SetVerifyOutput verifySettings(WEX::TestExecution::VerifyOutputSettings::LogOnlyFailures);
 
@@ -2678,7 +2677,6 @@ TEST_F(CompilerTest, CompileWhenNoMemThenOOM) {
     VERIFY_ARE_EQUAL(initialRefCount, InstrMalloc.GetRefCount());
   }
 }
-#endif // DXC_ON_APPVEYOR_CI
 
 TEST_F(CompilerTest, CompileWhenShaderModelMismatchAttributeThenFail) {
   CComPtr<IDxcCompiler> pCompiler;
@@ -5656,6 +5654,10 @@ TEST_F(CompilerTest, CodeGenDx12MiniEngineParticletilecullingcs){
   CodeGenTestCheck(L"..\\CodeGenHLSL\\Samples\\MiniEngine\\ParticleTileCullingCS.hlsl");
 }
 
+TEST_F(CompilerTest, CodeGenDx12MiniEngineParticletilecullingcs_fail_unroll){
+  CodeGenTestCheck(L"..\\CodeGenHLSL\\Samples\\MiniEngine\\ParticleTileCullingCS_fail_unroll.hlsl");
+}
+
 TEST_F(CompilerTest, CodeGenDx12MiniEngineParticletilerendercs){
   CodeGenTestCheck(L"..\\CodeGenHLSL\\Samples\\MiniEngine\\ParticleTileRenderCS.hlsl");
 }
@@ -6001,6 +6003,19 @@ TEST_F(CompilerTest, SubobjectCodeGenErrors) {
     std::string failLog(VerifyOperationFailed(pResult));
     VERIFY_ARE_NOT_EQUAL(string::npos, failLog.find(testCases[i].expectedError));
   }
+}
+
+TEST_F(CompilerTest, Unroll) {
+  using namespace WEX::TestExecution;
+  std::wstring suitePath = L"..\\CodeGenHLSL\\unroll";
+
+  WEX::Common::String value;
+  if (!DXC_FAILED(RuntimeParameters::TryGetValue(L"SuitePath", value)))
+  {
+    suitePath = value;
+  }
+
+  CodeGenTestCheckBatchDir(suitePath);
 }
 
 TEST_F(CompilerTest, ShaderCompatSuite) {
