@@ -746,51 +746,51 @@ void SPIRVEmitter::HandleTranslationUnit(ASTContext &context) {
   // Output the constructed module.
   std::vector<uint32_t> m = theBuilder.takeModule();
 
-  //if (!spirvOptions.codeGenHighLevel) {
-  //  // Run legalization passes
-  //  if (needsLegalization || declIdMapper.requiresLegalization()) {
-  //    std::string messages;
-  //    if (!spirvToolsLegalize(targetEnv, &m, &messages)) {
-  //      emitFatalError("failed to legalize SPIR-V: %0", {}) << messages;
-  //      emitNote("please file a bug report on "
-  //               "https://github.com/Microsoft/DirectXShaderCompiler/issues "
-  //               "with source code if possible",
-  //               {});
-  //      return;
-  //    } else if (!messages.empty()) {
-  //      emitWarning("SPIR-V legalization: %0", {}) << messages;
-  //    }
-  //  }
+  if (!spirvOptions.codeGenHighLevel) {
+    // Run legalization passes
+    if (needsLegalization || declIdMapper.requiresLegalization()) {
+      std::string messages;
+      if (!spirvToolsLegalize(targetEnv, &m, &messages)) {
+        emitFatalError("failed to legalize SPIR-V: %0", {}) << messages;
+        emitNote("please file a bug report on "
+                 "https://github.com/Microsoft/DirectXShaderCompiler/issues "
+                 "with source code if possible",
+                 {});
+        return;
+      } else if (!messages.empty()) {
+        emitWarning("SPIR-V legalization: %0", {}) << messages;
+      }
+    }
 
-  //  // Run optimization passes
-  //  if (theCompilerInstance.getCodeGenOpts().OptimizationLevel > 0) {
-  //    std::string messages;
-  //    if (!spirvToolsOptimize(targetEnv, &m, spirvOptions.optConfig,
-  //                            &messages)) {
-  //      emitFatalError("failed to optimize SPIR-V: %0", {}) << messages;
-  //      emitNote("please file a bug report on "
-  //               "https://github.com/Microsoft/DirectXShaderCompiler/issues "
-  //               "with source code if possible",
-  //               {});
-  //      return;
-  //    }
-  //  }
-  //}
+    // Run optimization passes
+    if (theCompilerInstance.getCodeGenOpts().OptimizationLevel > 0) {
+      std::string messages;
+      if (!spirvToolsOptimize(targetEnv, &m, spirvOptions.optConfig,
+                              &messages)) {
+        emitFatalError("failed to optimize SPIR-V: %0", {}) << messages;
+        emitNote("please file a bug report on "
+                 "https://github.com/Microsoft/DirectXShaderCompiler/issues "
+                 "with source code if possible",
+                 {});
+        return;
+      }
+    }
+  }
 
-  //// Validate the generated SPIR-V code
-  //if (!spirvOptions.disableValidation) {
-  //  std::string messages;
-  //  if (!spirvToolsValidate(targetEnv, spirvOptions,
-  //                          declIdMapper.requiresLegalization(), &m,
-  //                          &messages)) {
-  //    emitFatalError("generated SPIR-V is invalid: %0", {}) << messages;
-  //    emitNote("please file a bug report on "
-  //             "https://github.com/Microsoft/DirectXShaderCompiler/issues "
-  //             "with source code if possible",
-  //             {});
-  //    return;
-  //  }
-  //}
+  // Validate the generated SPIR-V code
+  if (!spirvOptions.disableValidation) {
+    std::string messages;
+    if (!spirvToolsValidate(targetEnv, spirvOptions,
+                            declIdMapper.requiresLegalization(), &m,
+                            &messages)) {
+      emitFatalError("generated SPIR-V is invalid: %0", {}) << messages;
+      emitNote("please file a bug report on "
+               "https://github.com/Microsoft/DirectXShaderCompiler/issues "
+               "with source code if possible",
+               {});
+      return;
+    }
+  }
 
   theCompilerInstance.getOutStream()->write(
       reinterpret_cast<const char *>(m.data()), m.size() * 4);

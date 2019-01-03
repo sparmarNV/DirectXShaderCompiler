@@ -162,9 +162,6 @@ bool runCompilerWithSpirvGeneration(const llvm::StringRef inputFilePath,
     if (profile.c_str()[0] != 'l') {
       flags.push_back(L"-E");
       flags.push_back(entry.c_str());
-    } else {
-      // TODO: need to disable spirv-opt until it is fixed
-      flags.push_back(L"-O0");
     }
     flags.push_back(L"-T");
     flags.push_back(profile.c_str());
