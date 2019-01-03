@@ -38,6 +38,9 @@ TEST_F(WholeFileTest, BezierDomainShader) {
 TEST_F(WholeFileTest, EmptyStructInterfaceVS) {
   runWholeFileTest("empty-struct-interface.vs.hlsl2spv");
 }
+TEST_F(WholeFileTest, RaytracingLibShader) {
+  runWholeFileTest("raytracing.lib.hlsl2spv");
+}
 
 // === Partial output tests ===
 

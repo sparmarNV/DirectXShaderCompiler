@@ -258,7 +258,7 @@ private:
 /// stage variables per Vulkan's requirements.
 class DeclResultIdMapper {
 public:
-  inline DeclResultIdMapper(const hlsl::ShaderModel &stage, ASTContext &context,
+  inline DeclResultIdMapper(const hlsl::ShaderModel *model, ASTContext &context,
                             ModuleBuilder &builder, SPIRVEmitter &emitter,
                             TypeTranslator &translator,
                             FeatureManager &features,
@@ -267,6 +267,9 @@ public:
   /// \brief Returns the <result-id> for a SPIR-V builtin variable.
   uint32_t getBuiltinVar(spv::BuiltIn builtIn);
 
+  uint32_t createRayTracingStageVar(spv::StorageClass sc, const VarDecl *decl,
+                                const llvm::StringRef namePrefix);
+  void createRayTracingImplicitVar(const VarDecl *decl);
   /// \brief Creates the stage output variables by parsing the semantics
   /// attached to the given function's parameter or return value and returns
   /// true on success. SPIR-V instructions will also be generated to update the
@@ -279,7 +282,7 @@ public:
   bool createStageOutputVar(const DeclaratorDecl *decl, uint32_t storedValue,
                             bool forPCF);
   /// \brief Overload for handling HS control point stage ouput variable.
-  bool createStageOutputVar(const DeclaratorDecl *decl, uint32_t arraySize,
+  bool createHSStageOutputVar(const DeclaratorDecl *decl, uint32_t arraySize,
                             uint32_t invocationId, uint32_t storedValue);
 
   /// \brief Creates the stage input variables by parsing the semantics attached
@@ -356,6 +359,9 @@ public:
 
   /// \brief Sets the <result-id> of the entry function.
   void setEntryFunctionId(uint32_t id) { entryFunctionId = id; }
+  void setCurrentShaderModel(const hlsl::ShaderModel *sModel) {
+    currentShaderModel = sModel;
+  }
 
 private:
   /// The struct containing SPIR-V information of a AST Decl.
@@ -575,6 +581,18 @@ private:
                        llvm::Optional<uint32_t> invocationId, uint32_t *value,
                        bool noWriteBack, SemanticInfo *inheritSemantic);
 
+  bool createNonStructureStageVar(const hlsl::SigPoint *sigPoint, const NamedDecl *decl,
+                       bool asInput, QualType asType, uint32_t arraySize,
+                       const llvm::StringRef namePrefix,
+                       llvm::Optional<uint32_t> invocationId, uint32_t *value,
+                       bool noWriteBack, SemanticInfo *inheritSemantic);
+
+
+
+  uint32_t createSpirvRayTracingStageVar(StageVar *, const NamedDecl *decl,
+    const llvm::StringRef name, SourceLocation loc);
+
+
   /// Creates the SPIR-V variable instruction for the given StageVar and returns
   /// the <result-id>. Also sets whether the StageVar is a SPIR-V builtin and
   /// its storage class accordingly. name will be used as the debug name when
@@ -629,7 +647,7 @@ private:
   inline bool isInputStorageClass(const StageVar &v);
 
 private:
-  const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
   ModuleBuilder &theBuilder;
   SPIRVEmitter &theEmitter;
   const SpirvCodeGenOptions &spirvOptions;
@@ -667,13 +685,12 @@ private:
   llvm::DenseMap<const DeclContext *, uint32_t> ctBufferPCTypeIds;
 
   /// <result-id> for the SPIR-V builtin variables accessed by
-  /// WaveGetLaneCount() and WaveGetLaneIndex().
+  /// WaveGetLaneCount() and WaveGetLaneIndex(), and ray tracing builtins
   ///
-  /// These are the only two cases that SPIR-V builtin variables are accessed
+  /// These are the only cases that SPIR-V builtin variables are accessed
   /// using HLSL intrinsic function calls. All other builtin variables are
   /// accessed using stage IO variables.
-  uint32_t laneCountBuiltinId;
-  uint32_t laneIndexBuiltinId;
+	llvm::DenseMap<uint32_t, uint32_t> functionToBuiltinIds;
 
   /// Whether the translated SPIR-V binary needs legalization.
   ///
@@ -747,17 +764,19 @@ void CounterIdAliasPair::assign(const CounterIdAliasPair &srcPair,
 }
 
 DeclResultIdMapper::DeclResultIdMapper(
-    const hlsl::ShaderModel &model, ASTContext &context, ModuleBuilder &builder,
+    const hlsl::ShaderModel *model, ASTContext &context, ModuleBuilder &builder,
     SPIRVEmitter &emitter, TypeTranslator &translator, FeatureManager &features,
     const SpirvCodeGenOptions &options)
-    : shaderModel(model), theBuilder(builder), theEmitter(emitter),
+    : currentShaderModel(model), theBuilder(builder), theEmitter(emitter),
       spirvOptions(options), astContext(context),
       diags(context.getDiagnostics()), typeTranslator(translator),
-      entryFunctionId(0), laneCountBuiltinId(0), laneIndexBuiltinId(0),
-      needsLegalization(false),
-      glPerVertex(model, context, builder, typeTranslator) {}
+      entryFunctionId(0), needsLegalization(false),
+      glPerVertex(*model, context, builder, typeTranslator) {}
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
+  // No locations to be assigned for raytracing stages
+  if (currentShaderModel->IsRay())
+    return true;
   // Try both input and output even if input location assignment failed
   return finalizeStageIOLocations(true) & finalizeStageIOLocations(false);
 }

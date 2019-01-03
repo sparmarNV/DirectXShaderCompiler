@@ -720,6 +720,54 @@ void ModuleBuilder::createEndPrimitive() {
   insertPoint->appendInstruction(std::move(constructSite));
 }
 
+void ModuleBuilder::createAcceptAndEndIntersectionCall() {
+  assert(insertPoint && "null insert point");
+  instBuilder.opAcceptAndEndIntersection().x();
+  insertPoint->appendInstruction(std::move(constructSite));
+}
+
+void ModuleBuilder::createIgnoreIntersectionCall() {
+  assert(insertPoint && "null insert point");
+  instBuilder.opIgnoreIntersection().x();
+  insertPoint->appendInstruction(std::move(constructSite));
+}
+
+uint32_t ModuleBuilder::createReportHitCall(uint32_t resultType, uint32_t thit, uint32_t hitkind) {
+
+  assert(insertPoint && "null insert point");
+  uint32_t resultId = theContext.takeNextId();
+  instBuilder.opReportIntersection(resultType, resultId, thit, hitkind).x();
+  insertPoint->appendInstruction(std::move(constructSite));
+  return resultId;
+}
+
+void ModuleBuilder::createTraceRayCall(uint32_t AS,
+                                           uint32_t flags, uint32_t mask,
+                                           uint32_t offset, uint32_t stride,
+                                           uint32_t index, uint32_t origin,
+                                           uint32_t tmin, uint32_t direction,
+                                           uint32_t tmax, uint32_t payload) {
+
+  assert(insertPoint && "null insert point");
+  instBuilder
+      .opTraceRays(AS, flags, mask, offset, stride, index,
+                   origin, tmin, direction, tmax, payload)
+      .x();
+  insertPoint->appendInstruction(std::move(constructSite));
+  return;
+}
+
+void ModuleBuilder::createCallShader(uint32_t sbtindex, uint32_t callableData)
+{
+  assert(insertPoint && "null insert point");
+  instBuilder
+    .opExecuteCallable(sbtindex, callableData)
+      .x();
+  insertPoint->appendInstruction(std::move(constructSite));
+  return;
+
+}
+
 void ModuleBuilder::addExecutionMode(uint32_t entryPointId,
                                      spv::ExecutionMode em,
                                      llvm::ArrayRef<uint32_t> params) {
@@ -1147,6 +1195,14 @@ uint32_t ModuleBuilder::getSamplerType() {
   const uint32_t typeId = theContext.getResultIdForType(type);
   theModule.addType(type, typeId);
   theModule.addDebugName(typeId, "type.sampler");
+  return typeId;
+}
+
+uint32_t ModuleBuilder::getAccelerationStructureType() {
+  const Type *type = Type::getAccelerationStructure(theContext);
+  const uint32_t typeId = theContext.getResultIdForType(type);
+  theModule.addType(type, typeId);
+  theModule.addDebugName(typeId, "type.accelerationstructure");
   return typeId;
 }
 

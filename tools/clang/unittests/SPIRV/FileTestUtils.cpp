@@ -85,7 +85,7 @@ bool processRunCommandArgs(const llvm::StringRef runCommandLine,
     fprintf(stderr, "Error: Missing target profile argument (-T).\n");
     return false;
   }
-  if (entryPoint->empty()) {
+  if (targetProfile->c_str()[0] != 'l' && entryPoint->empty()) {
     fprintf(stderr, "Error: Missing entry point argument (-E).\n");
     return false;
   }
@@ -159,8 +159,13 @@ bool runCompilerWithSpirvGeneration(const llvm::StringRef inputFilePath,
         requires_opt = true;
 
     std::vector<LPCWSTR> flags;
-    flags.push_back(L"-E");
-    flags.push_back(entry.c_str());
+    if (profile.c_str()[0] != 'l') {
+      flags.push_back(L"-E");
+      flags.push_back(entry.c_str());
+    } else {
+      // TODO: need to disable spirv-opt until it is fixed
+      flags.push_back(L"-O0");
+    }
     flags.push_back(L"-T");
     flags.push_back(profile.c_str());
     flags.push_back(L"-spirv");

@@ -111,6 +111,11 @@ const Type *Type::getSampler(SPIRVContext &context, DecorationSet d) {
   Type t = Type(spv::Op::OpTypeSampler, {}, d);
   return getUniqueType(context, t);
 }
+const Type *Type::getAccelerationStructure(SPIRVContext &context,
+                                           DecorationSet d) {
+  Type t = Type(spv::Op::OpTypeAccelerationStructureNV, {}, d);
+  return getUniqueType(context, t);
+}
 const Type *Type::getSampledImage(SPIRVContext &context, uint32_t image_type_id,
                                   DecorationSet d) {
   Type t = Type(spv::Op::OpTypeSampledImage, {image_type_id}, d);

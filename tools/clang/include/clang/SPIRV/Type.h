@@ -87,6 +87,8 @@ public:
            llvm::Optional<spv::AccessQualifier> access_qualifier = llvm::None,
            DecorationSet decs = {});
   static const Type *getSampler(SPIRVContext &ctx, DecorationSet decs = {});
+  static const Type *getAccelerationStructure(SPIRVContext &ctx,
+                                              DecorationSet decs = {});
   static const Type *getSampledImage(SPIRVContext &ctx, uint32_t imag_type_id,
                                      DecorationSet decs = {});
   static const Type *getArray(SPIRVContext &ctx, uint32_t component_type_id,

@@ -1,0 +1,777 @@
+// Run: %dxc -T lib_6_4
+
+//--------------------------------------------------------------------------------------
+// This file contains the Ray tracing shaders with multiple entry points
+//--------------------------------------------------------------------------------------
+
+typedef float3 XMFLOAT3;
+typedef float4 XMFLOAT4;
+typedef float4 XMVECTOR;
+typedef float4x4 XMMATRIX;
+typedef uint UINT;
+
+struct SceneConstantBuffer
+{
+    XMMATRIX projectionToWorld;
+    XMVECTOR cameraPosition;
+    XMVECTOR lightPosition;
+    XMVECTOR lightAmbientColor;
+    XMVECTOR lightDiffuseColor;
+};
+
+struct CubeConstantBuffer
+{
+    XMFLOAT4 albedo;
+};
+
+struct Vertex
+{
+    XMFLOAT3 position;
+    XMFLOAT3 normal;
+};
+
+RaytracingAccelerationStructure Scene : register(t0, space0);
+RWTexture2D<float4> RenderTarget : register(u0);
+ByteAddressBuffer Indices : register(t1, space0);
+StructuredBuffer<Vertex> Vertices : register(t2, space0);
+
+ConstantBuffer<SceneConstantBuffer> g_sceneCB : register(b0);
+ConstantBuffer<CubeConstantBuffer> g_cubeCB : register(b1);
+
+// Load three 16 bit indices from a byte addressed buffer.
+uint3 Load3x16BitIndices(uint offsetBytes)
+{
+    uint3 indices;
+
+    // ByteAdressBuffer loads must be aligned at a 4 byte boundary.
+    // Since we need to read three 16 bit indices: { 0, 1, 2 } 
+    // aligned at a 4 byte boundary as: { 0 1 } { 2 0 } { 1 2 } { 0 1 } ...
+    // we will load 8 bytes (~ 4 indices { a b | c d }) to handle two possible index triplet layouts,
+    // based on first index's offsetBytes being aligned at the 4 byte boundary or not:
+    //  Aligned:     { 0 1 | 2 - }
+    //  Not aligned: { - 0 | 1 2 }
+    const uint dwordAlignedOffset = offsetBytes & ~3;    
+    const uint2 four16BitIndices = Indices.Load2(dwordAlignedOffset);
+ 
+    // Aligned: { 0 1 | 2 - } => retrieve first three 16bit indices
+    if (dwordAlignedOffset == offsetBytes)
+    {
+        indices.x = four16BitIndices.x & 0xffff;
+        indices.y = (four16BitIndices.x >> 16) & 0xffff;
+        indices.z = four16BitIndices.y & 0xffff;
+    }
+    else // Not aligned: { - 0 | 1 2 } => retrieve last three 16bit indices
+    {
+        indices.x = (four16BitIndices.x >> 16) & 0xffff;
+        indices.y = four16BitIndices.y & 0xffff;
+        indices.z = (four16BitIndices.y >> 16) & 0xffff;
+    }
+
+    return indices;
+}
+
+typedef BuiltInTriangleIntersectionAttributes MyAttributes;
+struct RayPayload
+{
+    float4 color;
+};
+
+// Retrieve hit world position.
+float3 HitWorldPosition()
+{
+    return WorldRayOrigin() + RayTCurrent() * WorldRayDirection();
+}
+
+// Retrieve attribute at a hit position interpolated from vertex attributes using the hit's barycentrics.
+float3 HitAttribute(float3 vertexAttribute[3], BuiltInTriangleIntersectionAttributes attr)
+{
+    return vertexAttribute[0] +
+        attr.barycentrics.x * (vertexAttribute[1] - vertexAttribute[0]) +
+        attr.barycentrics.y * (vertexAttribute[2] - vertexAttribute[0]);
+}
+
+// Generate a ray in world space for a camera pixel corresponding to an index from the dispatched 2D grid.
+inline void GenerateCameraRay(uint2 index, out float3 origin, out float3 direction)
+{
+    float2 xy = index + 0.5f; // center in the middle of the pixel.
+    float2 screenPos = xy / DispatchRaysDimensions().xy * 2.0 - 1.0;
+
+    // Invert Y for DirectX-style coordinates.
+    screenPos.y = -screenPos.y;
+
+    // Unproject the pixel coordinate into a ray.
+    float4 world = mul(float4(screenPos, 0, 1), g_sceneCB.projectionToWorld);
+
+    world.xyz /= world.w;
+    origin = g_sceneCB.cameraPosition.xyz;
+    direction = normalize(world.xyz - origin);
+}
+
+// Diffuse lighting calculation.
+float4 CalculateDiffuseLighting(float3 hitPosition, float3 normal)
+{
+    float3 pixelToLight = normalize(g_sceneCB.lightPosition.xyz - hitPosition);
+
+    // Diffuse contribution.
+    float fNDotL = max(0.0f, dot(pixelToLight, normal));
+
+    return g_cubeCB.albedo * g_sceneCB.lightDiffuseColor * fNDotL;
+}
+
+[shader("raygeneration")]
+void MyRaygenShader()
+{
+    float3 rayDir;
+    float3 origin;
+    
+    // Generate a ray for a camera pixel corresponding to an index from the dispatched 2D grid.
+    GenerateCameraRay(DispatchRaysIndex().xy, origin, rayDir);
+
+    // Trace the ray.
+    // Set the ray's extents.
+    RayDesc ray;
+    ray.Origin = origin;
+    ray.Direction = rayDir;
+    // Set TMin to a non-zero small value to avoid aliasing issues due to floating - point errors.
+    // TMin should be kept small to prevent missing geometry at close contact areas.
+    ray.TMin = 0.001;
+    ray.TMax = 10000.0;
+    RayPayload payload = { float4(0, 0, 0, 0) };
+    TraceRay(Scene, RAY_FLAG_CULL_BACK_FACING_TRIANGLES, ~0, 0, 1, 0, ray, payload);
+
+    // Write the raytraced color to the output texture.
+    RenderTarget[DispatchRaysIndex().xy] = payload.color;
+}
+
+[shader("closesthit")]
+void MyClosestHitShader(inout RayPayload payload, in MyAttributes attr)
+{
+    float3 hitPosition = HitWorldPosition();
+
+    // Get the base index of the triangle's first 16 bit index.
+    uint indexSizeInBytes = 2;
+    uint indicesPerTriangle = 3;
+    uint triangleIndexStride = indicesPerTriangle * indexSizeInBytes;
+    uint baseIndex = PrimitiveIndex() * triangleIndexStride;
+
+    // Load up 3 16 bit indices for the triangle.
+    const uint3 indices = Load3x16BitIndices(baseIndex);
+
+    // Retrieve corresponding vertex normals for the triangle vertices.
+    float3 vertexNormals[3] = { 
+        Vertices[indices[0]].normal, 
+        Vertices[indices[1]].normal, 
+        Vertices[indices[2]].normal 
+    };
+
+    // Compute the triangle's normal.
+    // This is redundant and done for illustration purposes 
+    // as all the per-vertex normals are the same and match triangle's normal in this sample. 
+    float3 triangleNormal = HitAttribute(vertexNormals, attr);
+
+    float4 diffuseColor = CalculateDiffuseLighting(hitPosition, triangleNormal);
+    float4 color = g_sceneCB.lightAmbientColor + diffuseColor;
+
+    payload.color = color;
+}
+
+[shader("miss")]
+void MyMissShader(inout RayPayload payload)
+{
+    float4 background = float4(0.0f, 0.2f, 0.4f, 1.0f);
+    payload.color = background;
+}
+
+// CHECK-WHOLE-SPIR-V:
+//                OpCapability RayTracingNV
+//                OpCapability Shader
+//                OpExtension "SPV_NV_ray_tracing"
+//         %245 = OpExtInstImport "GLSL.std.450"
+//                OpMemoryModel Logical GLSL450
+//                OpEntryPoint MissNV %MyMissShader "MyMissShader" %54 %gl_PrimitiveID %212 %254 %256 %259
+//                OpEntryPoint ClosestHitNV %MyClosestHitShader "MyClosestHitShader" %54 %gl_PrimitiveID %212 %254 %256 %259
+//                OpEntryPoint RayGenerationNV %MyRaygenShader "MyRaygenShader" %54 %gl_PrimitiveID %212 %254 %256 %259
+//                OpSource HLSL 640
+//                OpName %bb_entry "bb.entry"
+//                OpName %bb_entry_0 "bb.entry"
+//                OpName %bb_entry_1 "bb.entry"
+//                OpName %bb_entry_2 "bb.entry"
+//                OpName %bb_entry_3 "bb.entry"
+//                OpName %bb_entry_4 "bb.entry"
+//                OpName %if_true "if.true"
+//                OpName %if_false "if.false"
+//                OpName %if_merge "if.merge"
+//                OpName %bb_entry_5 "bb.entry"
+//                OpName %bb_entry_6 "bb.entry"
+//                OpName %type_accelerationstructure "type.accelerationstructure"
+//                OpName %Scene "Scene"
+//                OpName %type_2d_image "type.2d.image"
+//                OpName %RenderTarget "RenderTarget"
+//                OpName %type_ByteAddressBuffer "type.ByteAddressBuffer"
+//                OpName %Indices "Indices"
+//                OpName %Vertex "Vertex"
+//                OpMemberName %Vertex 0 "position"
+//                OpMemberName %Vertex 1 "normal"
+//                OpName %type_StructuredBuffer_Vertex "type.StructuredBuffer.Vertex"
+//                OpName %Vertices "Vertices"
+//                OpName %type_ConstantBuffer_SceneConstantBuffer "type.ConstantBuffer.SceneConstantBuffer"
+//                OpMemberName %type_ConstantBuffer_SceneConstantBuffer 0 "projectionToWorld"
+//                OpMemberName %type_ConstantBuffer_SceneConstantBuffer 1 "cameraPosition"
+//                OpMemberName %type_ConstantBuffer_SceneConstantBuffer 2 "lightPosition"
+//                OpMemberName %type_ConstantBuffer_SceneConstantBuffer 3 "lightAmbientColor"
+//                OpMemberName %type_ConstantBuffer_SceneConstantBuffer 4 "lightDiffuseColor"
+//                OpName %g_sceneCB "g_sceneCB"
+//                OpName %type_ConstantBuffer_CubeConstantBuffer "type.ConstantBuffer.CubeConstantBuffer"
+//                OpMemberName %type_ConstantBuffer_CubeConstantBuffer 0 "albedo"
+//                OpName %g_cubeCB "g_cubeCB"
+//                OpName %src_MyRaygenShader "src.MyRaygenShader"
+//                OpName %MyRaygenShader "MyRaygenShader"
+//                OpName %rayDir "rayDir"
+//                OpName %origin "origin"
+//                OpName %param_var_index "param.var.index"
+//                OpName %GenerateCameraRay "GenerateCameraRay"
+//                OpName %RayDesc "RayDesc"
+//                OpMemberName %RayDesc 0 "Origin"
+//                OpMemberName %RayDesc 1 "TMin"
+//                OpMemberName %RayDesc 2 "Direction"
+//                OpMemberName %RayDesc 3 "TMax"
+//                OpName %ray "ray"
+//                OpName %RayPayload "RayPayload"
+//                OpMemberName %RayPayload 0 "color"
+//                OpName %payload "payload"
+//                OpName %payload_0 "payload"
+//                OpName %src_MyClosestHitShader "src.MyClosestHitShader"
+//                OpName %MyClosestHitShader "MyClosestHitShader"
+//                OpName %param_var_payload "param.var.payload"
+//                OpName %payload_1 "payload"
+//                OpName %BuiltInTriangleIntersectionAttributes "BuiltInTriangleIntersectionAttributes"
+//                OpMemberName %BuiltInTriangleIntersectionAttributes 0 "barycentrics"
+//                OpName %param_var_attr "param.var.attr"
+//                OpName %attr "attr"
+//                OpName %payload_2 "payload"
+//                OpName %attr_0 "attr"
+//                OpName %hitPosition "hitPosition"
+//                OpName %HitWorldPosition "HitWorldPosition"
+//                OpName %indexSizeInBytes "indexSizeInBytes"
+//                OpName %indicesPerTriangle "indicesPerTriangle"
+//                OpName %triangleIndexStride "triangleIndexStride"
+//                OpName %baseIndex "baseIndex"
+//                OpName %indices "indices"
+//                OpName %param_var_offsetBytes "param.var.offsetBytes"
+//                OpName %Load3x16BitIndices "Load3x16BitIndices"
+//                OpName %vertexNormals "vertexNormals"
+//                OpName %triangleNormal "triangleNormal"
+//                OpName %param_var_vertexAttribute "param.var.vertexAttribute"
+//                OpName %param_var_attr_0 "param.var.attr"
+//                OpName %HitAttribute "HitAttribute"
+//                OpName %diffuseColor "diffuseColor"
+//                OpName %param_var_hitPosition "param.var.hitPosition"
+//                OpName %param_var_normal "param.var.normal"
+//                OpName %CalculateDiffuseLighting "CalculateDiffuseLighting"
+//                OpName %color "color"
+//                OpName %src_MyMissShader "src.MyMissShader"
+//                OpName %MyMissShader "MyMissShader"
+//                OpName %param_var_payload_0 "param.var.payload"
+//                OpName %payload_3 "payload"
+//                OpName %payload_4 "payload"
+//                OpName %background "background"
+//                OpName %index "index"
+//                OpName %origin_0 "origin"
+//                OpName %direction "direction"
+//                OpName %xy "xy"
+//                OpName %screenPos "screenPos"
+//                OpName %world "world"
+//                OpName %offsetBytes "offsetBytes"
+//                OpName %indices_0 "indices"
+//                OpName %dwordAlignedOffset "dwordAlignedOffset"
+//                OpName %four16BitIndices "four16BitIndices"
+//                OpName %vertexAttribute "vertexAttribute"
+//                OpName %attr_1 "attr"
+//                OpName %hitPosition_0 "hitPosition"
+//                OpName %normal "normal"
+//                OpName %pixelToLight "pixelToLight"
+//                OpName %fNDotL "fNDotL"
+//                OpDecorate %_runtimearr_uint ArrayStride 4
+//                OpDecorate %type_ByteAddressBuffer BufferBlock
+//                OpMemberDecorate %type_ByteAddressBuffer 0 Offset 0
+//                OpMemberDecorate %type_ByteAddressBuffer 0 NonWritable
+//                OpMemberDecorate %Vertex 0 Offset 0
+//                OpMemberDecorate %Vertex 1 Offset 16
+//                OpDecorate %_runtimearr_Vertex ArrayStride 32
+//                OpMemberDecorate %type_StructuredBuffer_Vertex 0 Offset 0
+//                OpMemberDecorate %type_StructuredBuffer_Vertex 0 NonWritable
+//                OpDecorate %type_StructuredBuffer_Vertex BufferBlock
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 0 Offset 0
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 0 MatrixStride 16
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 0 RowMajor
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 1 Offset 64
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 2 Offset 80
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 3 Offset 96
+//                OpMemberDecorate %type_ConstantBuffer_SceneConstantBuffer 4 Offset 112
+//                OpDecorate %type_ConstantBuffer_SceneConstantBuffer Block
+//                OpMemberDecorate %type_ConstantBuffer_CubeConstantBuffer 0 Offset 0
+//                OpDecorate %type_ConstantBuffer_CubeConstantBuffer Block
+//                OpDecorate %54 BuiltIn LaunchIdNV
+//                OpDecorate %payload_0 Location 0
+//                OpDecorate %gl_PrimitiveID BuiltIn PrimitiveId
+//                OpDecorate %212 BuiltIn LaunchSizeNV
+//                OpDecorate %254 BuiltIn WorldRayOriginNV
+//                OpDecorate %256 BuiltIn WorldRayDirectionNV
+//                OpDecorate %259 BuiltIn HitTNV
+//                OpDecorate %Scene DescriptorSet 0
+//                OpDecorate %Scene Binding 0
+//                OpDecorate %RenderTarget DescriptorSet 0
+//                OpDecorate %RenderTarget Binding 0
+//                OpDecorate %Indices DescriptorSet 0
+//                OpDecorate %Indices Binding 1
+//                OpDecorate %Vertices DescriptorSet 0
+//                OpDecorate %Vertices Binding 2
+//                OpDecorate %g_sceneCB DescriptorSet 0
+//                OpDecorate %g_sceneCB Binding 0
+//                OpDecorate %g_cubeCB DescriptorSet 0
+//                OpDecorate %g_cubeCB Binding 1
+//         %int = OpTypeInt 32 1
+//       %int_0 = OpConstant %int 0
+//       %int_1 = OpConstant %int 1
+//       %int_2 = OpConstant %int 2
+//       %int_4 = OpConstant %int 4
+//       %int_8 = OpConstant %int 8
+//      %int_16 = OpConstant %int 16
+//      %int_32 = OpConstant %int 32
+//      %int_64 = OpConstant %int 64
+//     %int_128 = OpConstant %int 128
+//     %int_254 = OpConstant %int 254
+//     %int_255 = OpConstant %int 255
+// %type_accelerationstructure = OpTypeAccelerationStructureNV
+// %_ptr_UniformConstant_type_accelerationstructure = OpTypePointer UniformConstant %type_accelerationstructure
+//       %float = OpTypeFloat 32
+// %type_2d_image = OpTypeImage %float 2D 2 0 0 2 Rgba32f
+// %_ptr_UniformConstant_type_2d_image = OpTypePointer UniformConstant %type_2d_image
+//        %uint = OpTypeInt 32 0
+// %_runtimearr_uint = OpTypeRuntimeArray %uint
+// %type_ByteAddressBuffer = OpTypeStruct %_runtimearr_uint
+// %_ptr_Uniform_type_ByteAddressBuffer = OpTypePointer Uniform %type_ByteAddressBuffer
+//     %v3float = OpTypeVector %float 3
+//      %Vertex = OpTypeStruct %v3float %v3float
+// %_runtimearr_Vertex = OpTypeRuntimeArray %Vertex
+// %type_StructuredBuffer_Vertex = OpTypeStruct %_runtimearr_Vertex
+// %_ptr_Uniform_type_StructuredBuffer_Vertex = OpTypePointer Uniform %type_StructuredBuffer_Vertex
+//     %v4float = OpTypeVector %float 4
+// %mat4v4float = OpTypeMatrix %v4float 4
+// %type_ConstantBuffer_SceneConstantBuffer = OpTypeStruct %mat4v4float %v4float %v4float %v4float %v4float
+// %_ptr_Uniform_type_ConstantBuffer_SceneConstantBuffer = OpTypePointer Uniform %type_ConstantBuffer_SceneConstantBuffer
+// %type_ConstantBuffer_CubeConstantBuffer = OpTypeStruct %v4float
+// %_ptr_Uniform_type_ConstantBuffer_CubeConstantBuffer = OpTypePointer Uniform %type_ConstantBuffer_CubeConstantBuffer
+//        %void = OpTypeVoid
+//          %41 = OpTypeFunction %void
+// %_ptr_Function_v3float = OpTypePointer Function %v3float
+//      %v2uint = OpTypeVector %uint 2
+// %_ptr_Function_v2uint = OpTypePointer Function %v2uint
+//      %v3uint = OpTypeVector %uint 3
+// %_ptr_Input_v3uint = OpTypePointer Input %v3uint
+//     %RayDesc = OpTypeStruct %v3float %float %v3float %float
+// %_ptr_Function_RayDesc = OpTypePointer Function %RayDesc
+// %float_0_00100000005 = OpConstant %float 0.00100000005
+// %_ptr_Function_float = OpTypePointer Function %float
+// %float_10000 = OpConstant %float 10000
+//       %int_3 = OpConstant %int 3
+//  %RayPayload = OpTypeStruct %v4float
+// %_ptr_Function_RayPayload = OpTypePointer Function %RayPayload
+//     %float_0 = OpConstant %float 0
+// %_ptr_RayPayloadNV_RayPayload = OpTypePointer RayPayloadNV %RayPayload
+//      %uint_0 = OpConstant %uint 0
+//      %uint_1 = OpConstant %uint 1
+// %uint_4294967295 = OpConstant %uint 4294967295
+// %_ptr_Function_v4float = OpTypePointer Function %v4float
+// %_ptr_IncomingRayPayloadNV_RayPayload = OpTypePointer IncomingRayPayloadNV %RayPayload
+//     %v2float = OpTypeVector %float 2
+// %BuiltInTriangleIntersectionAttributes = OpTypeStruct %v2float
+// %_ptr_Function_BuiltInTriangleIntersectionAttributes = OpTypePointer Function %BuiltInTriangleIntersectionAttributes
+// %_ptr_HitAttributeNV_BuiltInTriangleIntersectionAttributes = OpTypePointer HitAttributeNV %BuiltInTriangleIntersectionAttributes
+//         %113 = OpTypeFunction %void %_ptr_Function_RayPayload %_ptr_Function_BuiltInTriangleIntersectionAttributes
+// %_ptr_Function_uint = OpTypePointer Function %uint
+//      %uint_2 = OpConstant %uint 2
+//      %uint_3 = OpConstant %uint 3
+// %_ptr_Input_uint = OpTypePointer Input %uint
+// %_ptr_Function_v3uint = OpTypePointer Function %v3uint
+// %_arr_v3float_uint_3 = OpTypeArray %v3float %uint_3
+// %_ptr_Function__arr_v3float_uint_3 = OpTypePointer Function %_arr_v3float_uint_3
+// %_ptr_Uniform_v3float = OpTypePointer Uniform %v3float
+// %_ptr_Uniform_v4float = OpTypePointer Uniform %v4float
+//         %188 = OpTypeFunction %void %_ptr_Function_RayPayload
+// %float_0_200000003 = OpConstant %float 0.200000003
+// %float_0_400000006 = OpConstant %float 0.400000006
+//     %float_1 = OpConstant %float 1
+//         %195 = OpConstantComposite %v4float %float_0 %float_0_200000003 %float_0_400000006 %float_1
+//         %198 = OpTypeFunction %void %_ptr_Function_v2uint %_ptr_Function_v3float %_ptr_Function_v3float
+// %_ptr_Function_v2float = OpTypePointer Function %v2float
+//   %float_0_5 = OpConstant %float 0.5
+//         %208 = OpConstantComposite %v2float %float_0_5 %float_0_5
+//     %float_2 = OpConstant %float 2
+//         %219 = OpConstantComposite %v2float %float_1 %float_1
+// %_ptr_Uniform_mat4v4float = OpTypePointer Uniform %mat4v4float
+//         %251 = OpTypeFunction %v3float
+// %_ptr_Input_v3float = OpTypePointer Input %v3float
+// %_ptr_Input_float = OpTypePointer Input %float
+//         %263 = OpTypeFunction %v3uint %_ptr_Function_uint
+// %uint_4294967292 = OpConstant %uint 4294967292
+// %_ptr_Uniform_uint = OpTypePointer Uniform %uint
+//        %bool = OpTypeBool
+//  %uint_65535 = OpConstant %uint 65535
+//     %uint_16 = OpConstant %uint 16
+//     %uint_31 = OpConstant %uint 31
+//         %322 = OpTypeFunction %v3float %_ptr_Function__arr_v3float_uint_3 %_ptr_Function_BuiltInTriangleIntersectionAttributes
+//         %348 = OpTypeFunction %v4float %_ptr_Function_v3float %_ptr_Function_v3float
+//       %Scene = OpVariable %_ptr_UniformConstant_type_accelerationstructure UniformConstant
+// %RenderTarget = OpVariable %_ptr_UniformConstant_type_2d_image UniformConstant
+//     %Indices = OpVariable %_ptr_Uniform_type_ByteAddressBuffer Uniform
+//    %Vertices = OpVariable %_ptr_Uniform_type_StructuredBuffer_Vertex Uniform
+//   %g_sceneCB = OpVariable %_ptr_Uniform_type_ConstantBuffer_SceneConstantBuffer Uniform
+//    %g_cubeCB = OpVariable %_ptr_Uniform_type_ConstantBuffer_CubeConstantBuffer Uniform
+//          %54 = OpVariable %_ptr_Input_v3uint Input
+//   %payload_0 = OpVariable %_ptr_RayPayloadNV_RayPayload RayPayloadNV
+//   %payload_1 = OpVariable %_ptr_IncomingRayPayloadNV_RayPayload IncomingRayPayloadNV
+//        %attr = OpVariable %_ptr_HitAttributeNV_BuiltInTriangleIntersectionAttributes HitAttributeNV
+// %gl_PrimitiveID = OpVariable %_ptr_Input_uint Input
+//   %payload_3 = OpVariable %_ptr_IncomingRayPayloadNV_RayPayload IncomingRayPayloadNV
+//         %212 = OpVariable %_ptr_Input_v3uint Input
+//         %254 = OpVariable %_ptr_Input_v3float Input
+//         %256 = OpVariable %_ptr_Input_v3float Input
+//         %259 = OpVariable %_ptr_Input_float Input
+// %MyRaygenShader = OpFunction %void None %41
+//          %43 = OpLabel
+//          %44 = OpFunctionCall %void %src_MyRaygenShader
+//                OpReturn
+//                OpFunctionEnd
+// %src_MyRaygenShader = OpFunction %void None %41
+//    %bb_entry = OpLabel
+//      %rayDir = OpVariable %_ptr_Function_v3float Function
+//      %origin = OpVariable %_ptr_Function_v3float Function
+// %param_var_index = OpVariable %_ptr_Function_v2uint Function
+//         %ray = OpVariable %_ptr_Function_RayDesc Function
+//     %payload = OpVariable %_ptr_Function_RayPayload Function
+//          %55 = OpLoad %v3uint %54
+//          %56 = OpVectorShuffle %v2uint %55 %55 0 1
+//                OpStore %param_var_index %56
+//          %58 = OpFunctionCall %void %GenerateCameraRay %param_var_index %origin %rayDir
+//          %62 = OpLoad %v3float %origin
+//          %63 = OpAccessChain %_ptr_Function_v3float %ray %int_0
+//                OpStore %63 %62
+//          %64 = OpLoad %v3float %rayDir
+//          %65 = OpAccessChain %_ptr_Function_v3float %ray %int_2
+//                OpStore %65 %64
+//          %68 = OpAccessChain %_ptr_Function_float %ray %int_1
+//                OpStore %68 %float_0_00100000005
+//          %71 = OpAccessChain %_ptr_Function_float %ray %int_3
+//                OpStore %71 %float_10000
+//          %76 = OpCompositeConstruct %v4float %float_0 %float_0 %float_0 %float_0
+//          %77 = OpCompositeConstruct %RayPayload %76
+//                OpStore %payload %77
+//          %80 = OpLoad %RayDesc %ray
+//          %81 = OpCompositeExtract %v3float %80 0
+//          %82 = OpCompositeExtract %float %80 1
+//          %83 = OpCompositeExtract %v3float %80 2
+//          %84 = OpCompositeExtract %float %80 3
+//          %86 = OpLoad %RayPayload %payload
+//                OpStore %payload_0 %86
+//          %89 = OpLoad %type_accelerationstructure %Scene
+//                OpTraceNV %89 %int_16 %uint_4294967295 %uint_0 %uint_1 %uint_0 %81 %82 %83 %84 %uint_0
+//          %90 = OpLoad %RayPayload %payload_0
+//                OpStore %payload %90
+//          %92 = OpAccessChain %_ptr_Function_v4float %payload %int_0
+//          %93 = OpLoad %v4float %92
+//          %94 = OpLoad %v3uint %54
+//          %95 = OpVectorShuffle %v2uint %94 %94 0 1
+//          %96 = OpLoad %type_2d_image %RenderTarget
+//                OpImageWrite %96 %95 %93
+//                OpReturn
+//                OpFunctionEnd
+// %MyClosestHitShader = OpFunction %void None %41
+//          %99 = OpLabel
+// %param_var_payload = OpVariable %_ptr_Function_RayPayload Function
+// %param_var_attr = OpVariable %_ptr_Function_BuiltInTriangleIntersectionAttributes Function
+//         %103 = OpLoad %RayPayload %payload_1
+//                OpStore %param_var_payload %103
+//         %110 = OpLoad %BuiltInTriangleIntersectionAttributes %attr
+//                OpStore %param_var_attr %110
+//         %111 = OpFunctionCall %void %src_MyClosestHitShader %param_var_payload %param_var_attr
+//         %112 = OpLoad %RayPayload %param_var_payload
+//                OpStore %payload_1 %112
+//                OpReturn
+//                OpFunctionEnd
+// %src_MyClosestHitShader = OpFunction %void None %113
+//   %payload_2 = OpFunctionParameter %_ptr_Function_RayPayload
+//      %attr_0 = OpFunctionParameter %_ptr_Function_BuiltInTriangleIntersectionAttributes
+//  %bb_entry_0 = OpLabel
+// %hitPosition = OpVariable %_ptr_Function_v3float Function
+// %indexSizeInBytes = OpVariable %_ptr_Function_uint Function
+// %indicesPerTriangle = OpVariable %_ptr_Function_uint Function
+// %triangleIndexStride = OpVariable %_ptr_Function_uint Function
+//   %baseIndex = OpVariable %_ptr_Function_uint Function
+//     %indices = OpVariable %_ptr_Function_v3uint Function
+// %param_var_offsetBytes = OpVariable %_ptr_Function_uint Function
+// %vertexNormals = OpVariable %_ptr_Function__arr_v3float_uint_3 Function
+// %triangleNormal = OpVariable %_ptr_Function_v3float Function
+// %param_var_vertexAttribute = OpVariable %_ptr_Function__arr_v3float_uint_3 Function
+// %param_var_attr_0 = OpVariable %_ptr_Function_BuiltInTriangleIntersectionAttributes Function
+// %diffuseColor = OpVariable %_ptr_Function_v4float Function
+// %param_var_hitPosition = OpVariable %_ptr_Function_v3float Function
+// %param_var_normal = OpVariable %_ptr_Function_v3float Function
+//       %color = OpVariable %_ptr_Function_v4float Function
+//         %119 = OpFunctionCall %v3float %HitWorldPosition
+//                OpStore %hitPosition %119
+//                OpStore %indexSizeInBytes %uint_2
+//                OpStore %indicesPerTriangle %uint_3
+//         %126 = OpLoad %uint %indicesPerTriangle
+//         %127 = OpLoad %uint %indexSizeInBytes
+//         %128 = OpIMul %uint %126 %127
+//                OpStore %triangleIndexStride %128
+//         %132 = OpLoad %uint %gl_PrimitiveID
+//         %133 = OpLoad %uint %triangleIndexStride
+//         %134 = OpIMul %uint %132 %133
+//                OpStore %baseIndex %134
+//         %138 = OpLoad %uint %baseIndex
+//                OpStore %param_var_offsetBytes %138
+//         %140 = OpFunctionCall %v3uint %Load3x16BitIndices %param_var_offsetBytes
+//                OpStore %indices %140
+//         %144 = OpAccessChain %_ptr_Function_uint %indices %uint_0
+//         %145 = OpLoad %uint %144
+//         %147 = OpAccessChain %_ptr_Uniform_v3float %Vertices %int_0 %145 %int_1
+//         %148 = OpLoad %v3float %147
+//         %149 = OpAccessChain %_ptr_Function_uint %indices %uint_1
+//         %150 = OpLoad %uint %149
+//         %151 = OpAccessChain %_ptr_Uniform_v3float %Vertices %int_0 %150 %int_1
+//         %152 = OpLoad %v3float %151
+//         %153 = OpAccessChain %_ptr_Function_uint %indices %uint_2
+//         %154 = OpLoad %uint %153
+//         %155 = OpAccessChain %_ptr_Uniform_v3float %Vertices %int_0 %154 %int_1
+//         %156 = OpLoad %v3float %155
+//         %157 = OpCompositeConstruct %_arr_v3float_uint_3 %148 %152 %156
+//                OpStore %vertexNormals %157
+//         %160 = OpLoad %_arr_v3float_uint_3 %vertexNormals
+//                OpStore %param_var_vertexAttribute %160
+//         %162 = OpLoad %BuiltInTriangleIntersectionAttributes %attr_0
+//                OpStore %param_var_attr_0 %162
+//         %164 = OpFunctionCall %v3float %HitAttribute %param_var_vertexAttribute %param_var_attr_0
+//                OpStore %triangleNormal %164
+//         %167 = OpLoad %v3float %hitPosition
+//                OpStore %param_var_hitPosition %167
+//         %169 = OpLoad %v3float %triangleNormal
+//                OpStore %param_var_normal %169
+//         %171 = OpFunctionCall %v4float %CalculateDiffuseLighting %param_var_hitPosition %param_var_normal
+//                OpStore %diffuseColor %171
+//         %174 = OpAccessChain %_ptr_Uniform_v4float %g_sceneCB %int_3
+//         %175 = OpLoad %v4float %174
+//         %176 = OpLoad %v4float %diffuseColor
+//         %177 = OpFAdd %v4float %175 %176
+//                OpStore %color %177
+//         %178 = OpLoad %v4float %color
+//         %179 = OpAccessChain %_ptr_Function_v4float %payload_2 %int_0
+//                OpStore %179 %178
+//                OpReturn
+//                OpFunctionEnd
+// %MyMissShader = OpFunction %void None %41
+//         %182 = OpLabel
+// %param_var_payload_0 = OpVariable %_ptr_Function_RayPayload Function
+//         %185 = OpLoad %RayPayload %payload_3
+//                OpStore %param_var_payload_0 %185
+//         %186 = OpFunctionCall %void %src_MyMissShader %param_var_payload_0
+//         %187 = OpLoad %RayPayload %param_var_payload_0
+//                OpStore %payload_3 %187
+//                OpReturn
+//                OpFunctionEnd
+// %src_MyMissShader = OpFunction %void None %188
+//   %payload_4 = OpFunctionParameter %_ptr_Function_RayPayload
+//  %bb_entry_1 = OpLabel
+//  %background = OpVariable %_ptr_Function_v4float Function
+//                OpStore %background %195
+//         %196 = OpLoad %v4float %background
+//         %197 = OpAccessChain %_ptr_Function_v4float %payload_4 %int_0
+//                OpStore %197 %196
+//                OpReturn
+//                OpFunctionEnd
+// %GenerateCameraRay = OpFunction %void None %198
+//       %index = OpFunctionParameter %_ptr_Function_v2uint
+//    %origin_0 = OpFunctionParameter %_ptr_Function_v3float
+//   %direction = OpFunctionParameter %_ptr_Function_v3float
+//  %bb_entry_2 = OpLabel
+//          %xy = OpVariable %_ptr_Function_v2float Function
+//   %screenPos = OpVariable %_ptr_Function_v2float Function
+//       %world = OpVariable %_ptr_Function_v4float Function
+//         %205 = OpLoad %v2uint %index
+//         %206 = OpConvertUToF %v2float %205
+//         %209 = OpFAdd %v2float %206 %208
+//                OpStore %xy %209
+//         %211 = OpLoad %v2float %xy
+//         %213 = OpLoad %v3uint %212
+//         %214 = OpVectorShuffle %v2uint %213 %213 0 1
+//         %215 = OpConvertUToF %v2float %214
+//         %216 = OpFDiv %v2float %211 %215
+//         %218 = OpVectorTimesScalar %v2float %216 %float_2
+//         %220 = OpFSub %v2float %218 %219
+//                OpStore %screenPos %220
+//         %221 = OpAccessChain %_ptr_Function_float %screenPos %int_1
+//         %222 = OpLoad %float %221
+//         %223 = OpFNegate %float %222
+//         %224 = OpAccessChain %_ptr_Function_float %screenPos %int_1
+//                OpStore %224 %223
+//         %226 = OpLoad %v2float %screenPos
+//         %227 = OpCompositeExtract %float %226 0
+//         %228 = OpCompositeExtract %float %226 1
+//         %229 = OpCompositeConstruct %v4float %227 %228 %float_0 %float_1
+//         %231 = OpAccessChain %_ptr_Uniform_mat4v4float %g_sceneCB %int_0
+//         %232 = OpLoad %mat4v4float %231
+//         %233 = OpMatrixTimesVector %v4float %232 %229
+//                OpStore %world %233
+//         %234 = OpAccessChain %_ptr_Function_float %world %int_3
+//         %235 = OpLoad %float %234
+//         %236 = OpCompositeConstruct %v3float %235 %235 %235
+//         %237 = OpLoad %v4float %world
+//         %238 = OpVectorShuffle %v3float %237 %237 0 1 2
+//         %239 = OpFDiv %v3float %238 %236
+//         %240 = OpLoad %v4float %world
+//         %241 = OpVectorShuffle %v4float %240 %239 4 5 6 3
+//                OpStore %world %241
+//         %242 = OpAccessChain %_ptr_Uniform_v4float %g_sceneCB %int_1
+//         %243 = OpLoad %v4float %242
+//         %244 = OpVectorShuffle %v3float %243 %243 0 1 2
+//                OpStore %origin_0 %244
+//         %246 = OpLoad %v4float %world
+//         %247 = OpVectorShuffle %v3float %246 %246 0 1 2
+//         %248 = OpLoad %v3float %origin_0
+//         %249 = OpFSub %v3float %247 %248
+//         %250 = OpExtInst %v3float %245 Normalize %249
+//                OpStore %direction %250
+//                OpReturn
+//                OpFunctionEnd
+// %HitWorldPosition = OpFunction %v3float None %251
+//  %bb_entry_3 = OpLabel
+//         %255 = OpLoad %v3float %254
+//         %257 = OpLoad %v3float %256
+//         %260 = OpLoad %float %259
+//         %261 = OpVectorTimesScalar %v3float %257 %260
+//         %262 = OpFAdd %v3float %255 %261
+//                OpReturnValue %262
+//                OpFunctionEnd
+// %Load3x16BitIndices = OpFunction %v3uint None %263
+// %offsetBytes = OpFunctionParameter %_ptr_Function_uint
+//  %bb_entry_4 = OpLabel
+//   %indices_0 = OpVariable %_ptr_Function_v3uint Function
+// %dwordAlignedOffset = OpVariable %_ptr_Function_uint Function
+// %four16BitIndices = OpVariable %_ptr_Function_v2uint Function
+//         %268 = OpLoad %uint %offsetBytes
+//         %270 = OpBitwiseAnd %uint %268 %uint_4294967292
+//                OpStore %dwordAlignedOffset %270
+//         %272 = OpLoad %uint %dwordAlignedOffset
+//         %273 = OpShiftRightLogical %uint %272 %uint_2
+//         %275 = OpAccessChain %_ptr_Uniform_uint %Indices %uint_0 %273
+//         %276 = OpLoad %uint %275
+//         %277 = OpIAdd %uint %273 %uint_1
+//         %278 = OpAccessChain %_ptr_Uniform_uint %Indices %uint_0 %277
+//         %279 = OpLoad %uint %278
+//         %280 = OpCompositeConstruct %v2uint %276 %279
+//                OpStore %four16BitIndices %280
+//         %281 = OpLoad %uint %dwordAlignedOffset
+//         %282 = OpLoad %uint %offsetBytes
+//         %284 = OpIEqual %bool %281 %282
+//                OpSelectionMerge %if_merge None
+//                OpBranchConditional %284 %if_true %if_false
+//     %if_true = OpLabel
+//         %288 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_0
+//         %289 = OpLoad %uint %288
+//         %291 = OpBitwiseAnd %uint %289 %uint_65535
+//         %292 = OpAccessChain %_ptr_Function_uint %indices_0 %int_0
+//                OpStore %292 %291
+//         %293 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_0
+//         %294 = OpLoad %uint %293
+//         %297 = OpBitwiseAnd %uint %uint_16 %uint_31
+//         %298 = OpShiftRightLogical %uint %294 %297
+//         %299 = OpBitwiseAnd %uint %298 %uint_65535
+//         %300 = OpAccessChain %_ptr_Function_uint %indices_0 %int_1
+//                OpStore %300 %299
+//         %301 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_1
+//         %302 = OpLoad %uint %301
+//         %303 = OpBitwiseAnd %uint %302 %uint_65535
+//         %304 = OpAccessChain %_ptr_Function_uint %indices_0 %int_2
+//                OpStore %304 %303
+//                OpBranch %if_merge
+//    %if_false = OpLabel
+//         %305 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_0
+//         %306 = OpLoad %uint %305
+//         %307 = OpBitwiseAnd %uint %uint_16 %uint_31
+//         %308 = OpShiftRightLogical %uint %306 %307
+//         %309 = OpBitwiseAnd %uint %308 %uint_65535
+//         %310 = OpAccessChain %_ptr_Function_uint %indices_0 %int_0
+//                OpStore %310 %309
+//         %311 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_1
+//         %312 = OpLoad %uint %311
+//         %313 = OpBitwiseAnd %uint %312 %uint_65535
+//         %314 = OpAccessChain %_ptr_Function_uint %indices_0 %int_1
+//                OpStore %314 %313
+//         %315 = OpAccessChain %_ptr_Function_uint %four16BitIndices %int_1
+//         %316 = OpLoad %uint %315
+//         %317 = OpBitwiseAnd %uint %uint_16 %uint_31
+//         %318 = OpShiftRightLogical %uint %316 %317
+//         %319 = OpBitwiseAnd %uint %318 %uint_65535
+//         %320 = OpAccessChain %_ptr_Function_uint %indices_0 %int_2
+//                OpStore %320 %319
+//                OpBranch %if_merge
+//    %if_merge = OpLabel
+//         %321 = OpLoad %v3uint %indices_0
+//                OpReturnValue %321
+//                OpFunctionEnd
+// %HitAttribute = OpFunction %v3float None %322
+// %vertexAttribute = OpFunctionParameter %_ptr_Function__arr_v3float_uint_3
+//      %attr_1 = OpFunctionParameter %_ptr_Function_BuiltInTriangleIntersectionAttributes
+//  %bb_entry_5 = OpLabel
+//         %326 = OpAccessChain %_ptr_Function_v3float %vertexAttribute %int_0
+//         %327 = OpLoad %v3float %326
+//         %328 = OpAccessChain %_ptr_Function_v3float %vertexAttribute %int_1
+//         %329 = OpLoad %v3float %328
+//         %330 = OpAccessChain %_ptr_Function_v3float %vertexAttribute %int_0
+//         %331 = OpLoad %v3float %330
+//         %332 = OpFSub %v3float %329 %331
+//         %333 = OpAccessChain %_ptr_Function_v2float %attr_1 %int_0
+//         %334 = OpAccessChain %_ptr_Function_float %333 %int_0
+//         %335 = OpLoad %float %334
+//         %336 = OpVectorTimesScalar %v3float %332 %335
+//         %337 = OpFAdd %v3float %327 %336
+//         %338 = OpAccessChain %_ptr_Function_v3float %vertexAttribute %int_2
+//         %339 = OpLoad %v3float %338
+//         %340 = OpAccessChain %_ptr_Function_v3float %vertexAttribute %int_0
+//         %341 = OpLoad %v3float %340
+//         %342 = OpFSub %v3float %339 %341
+//         %343 = OpAccessChain %_ptr_Function_v2float %attr_1 %int_0
+//         %344 = OpAccessChain %_ptr_Function_float %343 %int_1
+//         %345 = OpLoad %float %344
+//         %346 = OpVectorTimesScalar %v3float %342 %345
+//         %347 = OpFAdd %v3float %337 %346
+//                OpReturnValue %347
+//                OpFunctionEnd
+// %CalculateDiffuseLighting = OpFunction %v4float None %348
+// %hitPosition_0 = OpFunctionParameter %_ptr_Function_v3float
+//      %normal = OpFunctionParameter %_ptr_Function_v3float
+//  %bb_entry_6 = OpLabel
+// %pixelToLight = OpVariable %_ptr_Function_v3float Function
+//      %fNDotL = OpVariable %_ptr_Function_float Function
+//         %353 = OpAccessChain %_ptr_Uniform_v4float %g_sceneCB %int_2
+//         %354 = OpLoad %v4float %353
+//         %355 = OpVectorShuffle %v3float %354 %354 0 1 2
+//         %356 = OpLoad %v3float %hitPosition_0
+//         %357 = OpFSub %v3float %355 %356
+//         %358 = OpExtInst %v3float %245 Normalize %357
+//                OpStore %pixelToLight %358
+//         %360 = OpLoad %v3float %pixelToLight
+//         %361 = OpLoad %v3float %normal
+//         %362 = OpDot %float %360 %361
+//         %363 = OpExtInst %float %245 FMax %float_0 %362
+//                OpStore %fNDotL %363
+//         %364 = OpAccessChain %_ptr_Uniform_v4float %g_cubeCB %int_0
+//         %365 = OpLoad %v4float %364
+//         %366 = OpAccessChain %_ptr_Uniform_v4float %g_sceneCB %int_4
+//         %367 = OpLoad %v4float %366
+//         %368 = OpFMul %v4float %365 %367
+//         %369 = OpLoad %float %fNDotL
+//         %370 = OpVectorTimesScalar %v4float %368 %369
+//                OpReturnValue %370
+//                OpFunctionEnd

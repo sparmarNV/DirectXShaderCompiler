@@ -78,6 +78,7 @@ private:
   void doVarDecl(const VarDecl *decl);
   void doRecordDecl(const RecordDecl *decl);
   void doHLSLBufferDecl(const HLSLBufferDecl *decl);
+  void doImplicitDecl(const Decl *);
 
   void doBreakStmt(const BreakStmt *stmt);
   void doDiscardStmt(const DiscardStmt *stmt);
@@ -486,6 +487,13 @@ private:
   /// Processes the NonUniformResourceIndex intrinsic function.
   SpirvEvalInfo processIntrinsicNonUniformResourceIndex(const CallExpr *);
 
+  void processRayIntersection(hlsl::IntrinsicOp op);
+  uint32_t processReportHit(const CallExpr *callExpr);
+  void processTraceRay(const CallExpr *callExpr);
+  void processRayCall(const CallExpr *callExpr);
+  uint32_t processRayIntrinsic(const CallExpr *callExpr, hlsl::IntrinsicOp op,
+                               uint32_t type);
+
 private:
   /// Returns the <result-id> for constant value 0 of the given type.
   uint32_t getValueZero(QualType type);
@@ -560,8 +568,10 @@ private:
   /// Emits an error if the given attribute is not a loop attribute.
   spv::LoopControlMask translateLoopAttribute(const Stmt *, const Attr &);
 
-  static spv::ExecutionModel
-  getSpirvShaderStage(const hlsl::ShaderModel &model);
+  spv::ExecutionModel
+  getSpirvShaderStage(const hlsl::ShaderModel *model);
+  const hlsl::ShaderModel *
+  getHLSLShaderStageFromName(const StringRef &model);
 
   void AddRequiredCapabilitiesForShaderModel();
 
@@ -600,6 +610,15 @@ private:
   /// variables for some cases.
   bool emitEntryFunctionWrapper(const FunctionDecl *entryFunction,
                                 uint32_t entryFuncId);
+
+  /// \brief Emits a wrapper function for the entry function and returns true
+  /// on success only for raytracing stages.
+  ///
+  /// This wrapper functions handles all functionality specific to raytracing
+  /// It creates rayPayloadInNV and hitAttributeNV stage variables for certain
+  /// stages and performs copy-in/copy-out for arguments of entry function
+
+  bool emitEntryFunctionWrapperForRaytracing(const FunctionDecl * decl, const uint32_t entryFuncId);
 
   /// \brief Performs the following operations for the Hull shader:
   /// * Creates an output variable which is an Array containing results for all
@@ -929,7 +948,7 @@ private:
   /// Entry function name and shader stage. Both of them are derived from the
   /// command line and should be const.
   const llvm::StringRef entryFunctionName;
-  const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
 
   SPIRVContext theContext;
   FeatureManager featureManager;
@@ -941,7 +960,16 @@ private:
   /// this queue will persist to avoid duplicated translations. And we'd like
   /// a deterministic order of iterating the queue for finding the next decl
   /// to translate. So we need SetVector here.
-  llvm::SetVector<const DeclaratorDecl *> workQueue;
+  struct FunctionEntryInfo {
+    const hlsl::ShaderModel *hlslModel;
+    spv::ExecutionModel executionModel;
+    uint32_t entryFunctionId;
+    const DeclaratorDecl *funcDecl;
+  };
+  const FunctionEntryInfo *currentEntry;
+
+  llvm::SmallVector<FunctionEntryInfo, 8> workQueue;
+  llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;
 
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.
@@ -1021,6 +1049,14 @@ private:
 
   /// Maps a given statement to the basic block that is associated with it.
   llvm::DenseMap<const Stmt *, uint32_t> stmtBasicBlock;
+
+  // Maps ...
+  // Maintains a map for type to location of corresponding rayPayload variable
+  llvm::DenseMap<uint32_t, uint32_t> payloadResultMap;
+  llvm::DenseMap<uint32_t, uint32_t> payloadLocationMap;
+  llvm::DenseMap<uint32_t, uint32_t> hitAttributeResultMap;
+  llvm::DenseMap<uint32_t, uint32_t> callDataResultMap;
+  llvm::DenseMap<uint32_t, uint32_t> callDataLocationMap;
 
   /// This is the Patch Constant Function. This function is not explicitly
   /// called from the entry point function.

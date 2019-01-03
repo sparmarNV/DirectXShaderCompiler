@@ -146,6 +146,8 @@ const Semantic Semantic::ms_SemanticTable[kNumSemanticRecords] = {
   SP(Kind::ViewID,                "SV_ViewID"),
   SP(Kind::Barycentrics,          "SV_Barycentrics"),
   SP(Kind::ShadingRate,           "SV_ShadingRate"),
+  SP(Kind::RayPayload,            "SV_RayPayload"),
+  SP(Kind::RayAttributes,         "SV_RayAttributes"),
   SP(Kind::Invalid,               nullptr),
 };
 

@@ -43,7 +43,7 @@ bool ShaderModel::operator==(const ShaderModel &other) const {
 
 bool ShaderModel::IsValid() const {
   DXASSERT(IsPS() || IsVS() || IsGS() || IsHS() || IsDS() || IsCS() ||
-               IsLib() || m_Kind == Kind::Invalid,
+               IsLib() || IsRay() || m_Kind == Kind::Invalid,
            "invalid shader model");
   return m_Kind != Kind::Invalid;
 }
@@ -70,8 +70,7 @@ bool ShaderModel::IsValidForDxil() const {
 }
 
 bool ShaderModel::IsValidForModule() const {
-  // Ray tracing shader model should only be used on functions in a lib
-  return IsValid() && !IsRay();
+  return IsValid();
 }
 
 const ShaderModel *ShaderModel::Get(unsigned Idx) {
@@ -102,12 +101,24 @@ const ShaderModel *ShaderModel::GetByName(const char *pszName) {
   case 'g':   kind = Kind::Geometry;  break;
   case 'h':   kind = Kind::Hull;      break;
   case 'd':   kind = Kind::Domain;    break;
-  case 'c':   kind = Kind::Compute;   break;
+  case 'c':
+    switch (pszName[1]) {
+    case 'a': kind = Kind::Callable; break;
+    case 's': kind = Kind::Compute;   break;
+    case 'h': kind = Kind::ClosestHit; break;
+    }
+    break;
   case 'l':   kind = Kind::Library;   break;
+  case 'r':   kind = Kind::RayGeneration; break;
+  case 'i':   kind = Kind::Intersection; break;
+  case 'a':   kind = Kind::AnyHit; break;
+  case 'm':   kind = Kind::Miss; break;
   default:    return GetInvalid();
   }
   unsigned Idx = 3;
-  if (kind != Kind::Library) {
+  if (kind >= Kind::RayGeneration && kind <= Kind::Callable) {
+    Idx = 5;
+  } else if (kind != Kind::Library) {
     if (pszName[1] != 's' || pszName[2] != '_')
       return GetInvalid();
   } else {
@@ -219,7 +230,7 @@ void ShaderModel::GetMinValidatorVersion(unsigned &ValMajor, unsigned &ValMinor)
 
 static const char *ShaderModelKindNames[] = {
     "ps", "vs", "gs", "hs", "ds", "cs", "lib",
-    "raygeneration", "intersection", "anyhit", "closesthit", "miss", "callable",
+    "rgen", "isec", "ahit", "chit", "miss", "call",
     "invalid",
 };
 
@@ -302,6 +313,24 @@ const ShaderModel ShaderModel::ms_ShaderModels[kNumShaderModels] = {
 
   // lib_6_x is for offline linking only, and relaxes restrictions
   SM(Kind::Library,  6, kOfflineMinor, "lib_6_x",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::RayGeneration, 6, 3, "rgen_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::RayGeneration, 6, 4, "rgen_6_4",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::Intersection,  6, 3, "isec_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::Intersection,  6, 4, "isec_6_4",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::AnyHit,        6, 3, "ahit_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::AnyHit,        6, 4, "ahit_6_4",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::ClosestHit,    6, 3, "chit_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::ClosestHit,    6, 4, "chit_6_4",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::Miss,          6, 3, "miss_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::Miss,          6, 4, "miss_6_4",  32, 32,  true,  true,  UINT_MAX),
+
+  SM(Kind::Callable,      6, 3, "call_6_3",  32, 32,  true,  true,  UINT_MAX),
+  SM(Kind::Callable,      6, 4, "call_6_4",  32, 32,  true,  true,  UINT_MAX),
 
   SM(Kind::Invalid,  0, 0, "invalid", 0,  0,   false, false, 0),
 };

@@ -113,8 +113,7 @@ bool IsHLSLNumericUserDefinedType(clang::QualType type) {
     // TODO: avoid check by name
     StringRef name = RD->getName();
     if (name == "ByteAddressBuffer" ||
-        name == "RWByteAddressBuffer" ||
-        name == "RaytracingAccelerationStructure")
+        name == "RWByteAddressBuffer")
       return false;
     for (auto member : RD->fields()) {
       if (!IsHLSLNumeric(member->getType()))
@@ -578,7 +577,8 @@ QualType GetHLSLResourceResultType(QualType type) {
   const RecordType *RT = cast<RecordType>(type);
   StringRef name = RT->getDecl()->getName();
 
-  if (name == "ByteAddressBuffer" || name == "RWByteAddressBuffer") {
+  if (name == "ByteAddressBuffer" || name == "RWByteAddressBuffer" ||
+      name == "RaytracingAccelerationStructure") {
     RecordDecl *RD = RT->getDecl();
     QualType resultTy = RD->field_begin()->getType();
     return resultTy;

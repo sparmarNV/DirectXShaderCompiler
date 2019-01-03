@@ -140,6 +140,10 @@ bool TypeTranslator::isOpaqueType(QualType type) {
 
     if (name == "SamplerState" || name == "SamplerComparisonState")
       return true;
+
+    if (name == "RaytracingAccelerationStructure")
+      return true;
+
   }
   return false;
 }
@@ -326,8 +330,8 @@ uint32_t TypeTranslator::getLocationCount(QualType type) {
 
   // Struct type
   if (type->getAs<RecordType>()) {
-    assert(false && "all structs should already be flattened");
-    return 0;
+    //assert(false && "all structs should already be flattened");
+    return 1; // XXX: Ray tracing payloads only
   }
 
   emitError(
@@ -1338,6 +1342,10 @@ uint32_t TypeTranslator::translateResourceType(QualType type,
   // Sampler types
   if (name == "SamplerState" || name == "SamplerComparisonState") {
     return theBuilder.getSamplerType();
+  }
+  // Ray tracing acceleration structure
+  if (name == "RaytracingAccelerationStructure") {
+    return theBuilder.getAccelerationStructureType();
   }
 
   if (name == "StructuredBuffer" || name == "RWStructuredBuffer" ||

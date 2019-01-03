@@ -322,6 +322,16 @@ public:
   /// \brief Creates an OpEndPrimitive instruction.
   void createEndPrimitive();
 
+  void createAcceptAndEndIntersectionCall();
+  void createIgnoreIntersectionCall();
+  uint32_t createReportHitCall(uint32_t result_type, uint32_t thit, uint32_t hitkind);
+  void createTraceRayCall(uint32_t AS, uint32_t flags,
+                              uint32_t mask, uint32_t offset, uint32_t stride,
+                              uint32_t index, uint32_t origin, uint32_t tmin,
+                              uint32_t direction, uint32_t tmax,
+                              uint32_t payload);
+
+  void createCallShader(uint32_t sbtindex, uint32_t callableData);
   // === SPIR-V Module Structure ===
 
   inline void useSpirv1p3();
@@ -467,6 +477,7 @@ public:
   uint32_t getSamplerType();
   uint32_t getSampledImageType(uint32_t imageType);
   uint32_t getByteAddressBufferType(bool isRW);
+  uint32_t getAccelerationStructureType();
 
   /// \brief Returns a struct type with 2 members. The first member is an
   /// unsigned integer type which can hold the 'Residency Code'. The second
