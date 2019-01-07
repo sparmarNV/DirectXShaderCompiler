@@ -32,6 +32,7 @@
 #include "clang/SPIRV/SpirvBuilder.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
+#include "clang/AST/TypeOrdering.h"
 
 #include "DeclResultIdMapper.h"
 #include "SpirvEvalInfo.h"
@@ -77,6 +78,7 @@ private:
   void doVarDecl(const VarDecl *decl);
   void doRecordDecl(const RecordDecl *decl);
   void doHLSLBufferDecl(const HLSLBufferDecl *decl);
+  void doImplicitDecl(const Decl *decl);
 
   void doBreakStmt(const BreakStmt *stmt);
   void doDiscardStmt(const DiscardStmt *stmt);
@@ -503,6 +505,13 @@ private:
   /// Processes the NonUniformResourceIndex intrinsic function.
   SpirvInstruction *processIntrinsicNonUniformResourceIndex(const CallExpr *);
 
+  /// 
+  /// Process builtins specific to raytracing
+  SpirvInstruction *processRayBuiltins(const CallExpr *, hlsl::IntrinsicOp op);
+
+  SpirvInstruction *processReportHit(const CallExpr *);
+  void processCallShader(const CallExpr *callExpr);
+  void processTraceRay(const CallExpr *callExpr);
 private:
   /// Returns the <result-id> for constant value 0 of the given type.
   SpirvConstant *getValueZero(QualType type);
@@ -621,6 +630,15 @@ private:
   bool emitEntryFunctionWrapper(const FunctionDecl *entryFunction,
                                 SpirvFunction *entryFuncId);
 
+  /// \brief Emits a wrapper function for the entry functions for raytracing stages
+  /// and returns true on success.
+  ///
+  /// Wrapper is specific to raytracing stages since for specific stages we 
+  /// create specific module scoped stage variables and perform copies to them
+  /// The wrapper function is also responsible for initializing global static
+  /// variables for some cases.
+  bool emitEntryFunctionWrapperForRaytracing(const FunctionDecl *entryFunction,
+                                SpirvFunction *entryFuncId);
   /// \brief Performs the following operations for the Hull shader:
   /// * Creates an output variable which is an Array containing results for all
   /// control points.
@@ -1046,6 +1064,14 @@ private:
   /// Maps a given statement to the basic block that is associated with it.
   llvm::DenseMap<const Stmt *, SpirvBasicBlock *> stmtBasicBlock;
 
+  uint32_t curPayloadLocation;
+
+  //std::map<QualType, SpirvInstruction *> mm;
+  llvm::DenseMap<QualType, SpirvVariable *> payloadResultMap;
+  llvm::DenseMap<QualType, uint32_t> payloadLocationMap;
+  llvm::DenseMap<QualType, SpirvVariable*> hitAttributeResultMap;
+  llvm::DenseMap<QualType, SpirvVariable*> callDataResultMap;
+  llvm::DenseMap<QualType, uint32_t> callDataLocationMap;
   /// This is the Patch Constant Function. This function is not explicitly
   /// called from the entry point function.
   FunctionDecl *patchConstFunc;

@@ -1016,7 +1016,21 @@ std::vector<SpirvVariable *> DeclResultIdMapper::collectStageVars() const {
   llvm::DenseSet<SpirvInstruction *> seenVars;
   for (const auto &var : stageVars) {
     auto *instr = var.getSpirvInstr();
-    if (seenVars.count(instr) == 0) {
+    spv::StorageClass sc = var.getStorageClass();
+    bool isValidInterfaceVar = true;
+    switch (sc) {
+    case spv::StorageClass::IncomingCallableDataNV:
+    case spv::StorageClass::IncomingRayPayloadNV:
+    case spv::StorageClass::HitAttributeNV:
+    case spv::StorageClass::RayPayloadNV:
+    case spv::StorageClass::CallableDataNV:
+      isValidInterfaceVar = false;
+      break;
+    default:
+      break;
+    }
+    if (seenVars.count(instr) == 0 && isValidInterfaceVar) {
+
       vars.push_back(instr);
       seenVars.insert(instr);
     }
@@ -2169,17 +2183,33 @@ void DeclResultIdMapper::decoratePSInterpolationMode(const NamedDecl *decl,
   }
 }
 
-SpirvVariable *DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn,
+SpirvVariable *DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn, QualType type,
                                                  SourceLocation loc) {
   // Guarantee uniqueness
+  uint32_t spvId = (uint32_t)builtIn;
+  const auto builtInVar = functionToBuiltinMap.find(spvId);
+  if (builtInVar != functionToBuiltinMap.end()) {
+      return builtInVar->second;
+  }
   switch (builtIn) {
   case spv::BuiltIn::SubgroupSize:
-    if (laneCountBuiltinVar)
-      return laneCountBuiltinVar;
-    break;
   case spv::BuiltIn::SubgroupLocalInvocationId:
-    if (laneIndexBuiltinVar)
-      return laneIndexBuiltinVar;
+  case spv::BuiltIn::HitTNV:
+  case spv::BuiltIn::RayTminNV:
+  case spv::BuiltIn::HitKindNV:
+  case spv::BuiltIn::IncomingRayFlagsNV:
+  case spv::BuiltIn::InstanceCustomIndexNV:
+  case spv::BuiltIn::PrimitiveId:
+  case spv::BuiltIn::InstanceId:
+  case spv::BuiltIn::WorldRayDirectionNV:
+  case spv::BuiltIn::WorldRayOriginNV:
+  case spv::BuiltIn::ObjectRayDirectionNV:
+  case spv::BuiltIn::ObjectRayOriginNV:
+  case spv::BuiltIn::ObjectToWorldNV:
+  case spv::BuiltIn::WorldToObjectNV: 
+  case spv::BuiltIn::LaunchIdNV:
+  case spv::BuiltIn::LaunchSizeNV: 
+    //Do nothing for now
     break;
   default:
     // Only allow the two cases we know about
@@ -2189,7 +2219,7 @@ SpirvVariable *DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn,
 
   // Create a dummy StageVar for this builtin variable
   auto var = spvBuilder.addStageBuiltinVar(
-      astContext.UnsignedIntTy, spv::StorageClass::Input, builtIn, loc);
+      type, spv::StorageClass::Input, builtIn, loc);
 
   const hlsl::SigPoint *sigPoint =
       hlsl::SigPoint::GetSigPoint(hlsl::SigPointFromInputQual(
@@ -2197,25 +2227,15 @@ SpirvVariable *DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn,
           /*isPatchConstant=*/false));
 
   StageVar stageVar(sigPoint, /*semaInfo=*/{}, /*builtinAttr=*/nullptr,
-                    astContext.UnsignedIntTy,
+                    type,
                     /*locCount=*/0);
 
   stageVar.setIsSpirvBuiltin();
   stageVar.setSpirvInstr(var);
   stageVars.push_back(stageVar);
 
-  switch (builtIn) {
-  case spv::BuiltIn::SubgroupSize:
-    laneCountBuiltinVar = var;
-    break;
-  case spv::BuiltIn::SubgroupLocalInvocationId:
-    laneIndexBuiltinVar = var;
-    break;
-  default:
-    // Only relevant to subgroup builtins.
-    break;
-  }
 
+  functionToBuiltinMap[spvId] = var;
   return var;
 }
 
@@ -2784,6 +2804,64 @@ QualType DeclResultIdMapper::getTypeAndCreateCounterForPotentialAliasVar(
   }
 
   return type;
+}
+
+SpirvVariable *DeclResultIdMapper::createRayTracingStageVar(const spv::StorageClass sc, const VarDecl *decl,
+  const llvm::StringRef namePrefix)
+{
+  QualType type = decl->getType();
+  SpirvVariable *retVal = nullptr;;
+  // Raytracing stages have no predefined semantics
+  auto thisSemantic = getStageVarSemantic(decl);
+  // Which semantic we should use for this decl
+  auto *semanticToUse = &thisSemantic;
+
+  const auto *builtinAttr = decl->getAttr<VKBuiltInAttr>();
+
+  // Sigpoints have no info for raytracing
+
+  // HitAttributeNV disallows location
+  // IncomingRayPayloadNV & RayPayloadNV have optional location
+  // Treat as 0 by default, we will set specific location for RayPayloadNV during processTraceRayIntrinsic
+  StageVar stageVar(
+    nullptr /*SigPoint */, *semanticToUse, builtinAttr, type,
+    0 /* Set default as 0 */);
+
+  stageVar.setStorageClass(sc);
+
+  const auto name = decl->getName();
+
+  switch (sc) {
+  case spv::StorageClass::IncomingRayPayloadNV:
+  case spv::StorageClass::IncomingCallableDataNV:
+  case spv::StorageClass::HitAttributeNV:
+  case spv::StorageClass::RayPayloadNV:
+  case spv::StorageClass::CallableDataNV:
+    retVal = spvBuilder.addModuleVar(
+      type, sc, name.str());
+    break;
+
+  default:
+    assert("Invalid storage class for raytracing" && 0);
+  }
+
+  stageVar.setIsSpirvBuiltin();
+  stageVar.setSpirvInstr(retVal);
+  stageVars.push_back(stageVar);
+
+  return retVal;
+
+}
+void DeclResultIdMapper::createRayTracingImplicitVar(const VarDecl *varDecl)
+{
+  APValue *val = varDecl->evaluateValue();
+  if (val) {
+    SpirvInstruction *constVal = spvBuilder.getConstantInt(astContext.UnsignedIntTy, val->getInt());
+    constVal->setRValue(true);
+    astDecls[varDecl].instr = constVal;
+  } else {
+    assert("Unsupported implicit raytracing declaration" && 0);
+  }
 }
 
 } // end namespace spirv

@@ -94,7 +94,7 @@ private:
               unsigned m_NumInputRegs, unsigned m_NumOutputRegs,
               bool m_bUAVs, bool m_bTypedUavs, unsigned m_UAVRegsLim);
 
-  static const unsigned kNumShaderModels = 56;
+  static const unsigned kNumShaderModels = 68;
   static const ShaderModel ms_ShaderModels[kNumShaderModels];
 
   static const ShaderModel *GetInvalid();

@@ -803,6 +803,15 @@ void SpirvBuilder::createLineInfo(SpirvString *file, uint32_t line,
   insertPoint->addInstruction(inst);
 }
 
+SpirvInstruction* SpirvBuilder::createRaytracingOpsNV(spv::Op opcode, QualType resultType, 
+                                         llvm::ArrayRef<SpirvInstruction *> operands,
+                                         SourceLocation loc)
+{
+  assert(insertPoint && "null insert point");
+  auto *inst = new (context) SpirvRaytracingOpNV(resultType, opcode, operands, loc);
+  insertPoint->addInstruction(inst);
+  return inst;
+}
 void SpirvBuilder::addExtension(Extension ext, llvm::StringRef target,
                                 SourceLocation loc) {
   // TODO: The extension management should be removed from here and added as a

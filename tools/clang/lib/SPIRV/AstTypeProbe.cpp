@@ -850,6 +850,9 @@ bool isOpaqueType(QualType type) {
 
     if (name == "SamplerState" || name == "SamplerComparisonState")
       return true;
+
+    if (name == "RaytracingAccelerationStructure")
+      return true;
   }
   return false;
 }

@@ -266,7 +266,7 @@ public:
                             const SpirvCodeGenOptions &spirvOptions);
 
   /// \brief Returns the SPIR-V builtin variable.
-  SpirvVariable *getBuiltinVar(spv::BuiltIn builtIn, SourceLocation);
+  SpirvVariable *getBuiltinVar(spv::BuiltIn builtIn, QualType type, SourceLocation);
 
   /// \brief Creates the stage output variables by parsing the semantics
   /// attached to the given function's parameter or return value and returns
@@ -292,6 +292,9 @@ public:
   bool createStageInputVar(const ParmVarDecl *paramDecl,
                            SpirvInstruction **loadedValue, bool forPCF);
 
+  /// \brief Creates stage variables for raytracing
+  SpirvVariable *createRayTracingStageVar(spv::StorageClass sc, const VarDecl *decl,
+    const llvm::StringRef namePrefix);
   /// \brief Creates a function-scope paramter in the current function and
   /// returns its instruction.
   SpirvFunctionParameter *createFnParam(const ParmVarDecl *param);
@@ -358,6 +361,11 @@ public:
 
   /// \brief Sets the entry function.
   void setEntryFunction(SpirvFunction *fn) { entryFunction = fn; }
+
+  /// Raytracing specific functions
+  /// \brief Handle specific implicit declarations present only in raytracing stages
+  void DeclResultIdMapper::createRayTracingImplicitVar(const VarDecl *varDecl);
+
 
 private:
   /// The struct containing SPIR-V information of a AST Decl.
@@ -665,14 +673,16 @@ private:
   /// to the SPIR-V type.
   llvm::DenseMap<const DeclContext *, const SpirvType *> ctBufferPCTypes;
 
-  /// The SPIR-V builtin variables accessed by WaveGetLaneCount() and
-  /// WaveGetLaneIndex().
+  /// The SPIR-V builtin variables accessed by WaveGetLaneCount(),
+  /// WaveGetLaneIndex() and ray tracing builtins
   ///
-  /// These are the only two cases that SPIR-V builtin variables are accessed
+  /// These are the only few cases where SPIR-V builtin variables are accessed
+
   /// using HLSL intrinsic function calls. All other builtin variables are
   /// accessed using stage IO variables.
   SpirvVariable *laneCountBuiltinVar;
   SpirvVariable *laneIndexBuiltinVar;
+  llvm::DenseMap<uint32_t, SpirvVariable *> functionToBuiltinMap;
 
   /// Whether the translated SPIR-V binary needs legalization.
   ///
@@ -761,6 +771,8 @@ DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel &model,
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
   // Try both input and output even if input location assignment failed
+  if (shaderModel.IsRay())
+    return true;
   return finalizeStageIOLocations(true) & finalizeStageIOLocations(false);
 }
 

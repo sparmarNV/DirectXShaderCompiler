@@ -195,6 +195,18 @@ namespace DXIL {
     PSIn, // Pixel Shader input
     PSOut, // Pixel Shader output
     CSIn, // Compute Shader input
+    RGenIn, // Ray Generation Shader input
+    ISecIn, // Intersection Shader input
+    AHitIn, // Any Hit Shader input
+    CHitIn, // Closest Hit Shader input
+    MissIn, // Miss Shader input
+    CallableIn, // Callable Shader input
+    RGenOut, // Ray Generation Shader output
+    ISecOut, // Intersection Shader output
+    AHitOut, // Any Hit Shader output
+    CHitOut, // Closest Hit Shader output
+    MissOut, // Miss Shader Output
+    CallableOut, // Callable Shader output
     Invalid,
   };
   // SigPointKind-ENUM:END
