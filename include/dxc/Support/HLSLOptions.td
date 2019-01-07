@@ -289,7 +289,7 @@ def Oconfig : CommaJoined<["-"], "Oconfig=">, Group<spirv_Group>, Flags<[CoreOpt
 // fxc-based flags that don't match those previously defined.
 
 def target_profile : JoinedOrSeparate<["-", "/"], "T">, Flags<[CoreOption]>, Group<hlslcomp_Group>, MetaVarName<"<profile>">,
-  HelpText<"Set target profile. \n\t<profile>: ps_6_0, ps_6_1, ps_6_2, ps_6_3, ps_6_4, \n\t\t vs_6_0, vs_6_1, vs_6_2, vs_6_3, vs_6_4, \n\t\t cs_6_0, cs_6_1, cs_6_2, cs_6_3, cs_6_4, \n\t\t gs_6_0, gs_6_1, gs_6_2, gs_6_3, gs_6_4, \n\t\t ds_6_0, ds_6_1, ds_6_2, ds_6_3, ds_6_4, \n\t\t hs_6_0, hs_6_1, hs_6_2, hs_6_3, hs_6_4, \n\t\t lib_6_3, lib_6_4">;
+  HelpText<"Set target profile. \n\t<profile>: ps_6_0, ps_6_1, ps_6_2, ps_6_3, ps_6_4, \n\t\t vs_6_0, vs_6_1, vs_6_2, vs_6_3, vs_6_4, \n\t\t cs_6_0, cs_6_1, cs_6_2, cs_6_3, cs_6_4, \n\t\t gs_6_0, gs_6_1, gs_6_2, gs_6_3, gs_6_4, \n\t\t ds_6_0, ds_6_1, ds_6_2, ds_6_3, ds_6_4, \n\t\t hs_6_0, hs_6_1, hs_6_2, hs_6_3, hs_6_4, \n\t\t lib_6_3, lib_6_4, \n\t\t rgen_6_3, rgen_6_4, \n\t\t isec_6_3, isec_6_4, \n\t\t ahit_6_3, ahit_6_4, \n\t\t chit_6_3, chit_6_4, \n\t\t miss_6_3, miss_6_4, \n\t\t call_6_3, call_6_4">;
 def entrypoint :  JoinedOrSeparate<["-", "/"], "E">, Flags<[CoreOption]>, Group<hlslcomp_Group>,
   HelpText<"Entry point name">;
 // /I <include> - already defined above
