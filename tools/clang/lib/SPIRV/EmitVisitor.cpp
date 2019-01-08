@@ -1485,6 +1485,7 @@ uint32_t EmitTypeHandler::emitType(const SpirvType *type) {
       curTypeInst.push_back(paramTypeId);
     finalizeTypeInstruction();
   }
+  // Acceleration Structure NV type
   else if (const auto *accType = dyn_cast<AccelerationStructureTypeNV>(type)) {
     initTypeInstruction(spv::Op::OpTypeAccelerationStructureNV);
     curTypeInst.push_back(id);

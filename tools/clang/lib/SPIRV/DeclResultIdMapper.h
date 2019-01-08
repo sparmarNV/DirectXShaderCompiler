@@ -293,8 +293,7 @@ public:
                            SpirvInstruction **loadedValue, bool forPCF);
 
   /// \brief Creates stage variables for raytracing
-  SpirvVariable *createRayTracingStageVar(spv::StorageClass sc, const VarDecl *decl,
-    const llvm::StringRef namePrefix);
+  SpirvVariable *createRayTracingStageVar(spv::StorageClass sc, const VarDecl *decl);
   /// \brief Creates a function-scope paramter in the current function and
   /// returns its instruction.
   SpirvFunctionParameter *createFnParam(const ParmVarDecl *param);
@@ -677,12 +676,9 @@ private:
   /// WaveGetLaneIndex() and ray tracing builtins
   ///
   /// These are the only few cases where SPIR-V builtin variables are accessed
-
   /// using HLSL intrinsic function calls. All other builtin variables are
   /// accessed using stage IO variables.
-  SpirvVariable *laneCountBuiltinVar;
-  SpirvVariable *laneIndexBuiltinVar;
-  llvm::DenseMap<uint32_t, SpirvVariable *> functionToBuiltinMap;
+  llvm::DenseMap<uint32_t, SpirvVariable *> builtinToVarMap;
 
   /// Whether the translated SPIR-V binary needs legalization.
   ///
@@ -765,14 +761,15 @@ DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel &model,
     : shaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
       spirvOptions(options), astContext(context), spvContext(spirvContext),
       diags(context.getDiagnostics()), entryFunction(nullptr),
-      laneCountBuiltinVar(nullptr), laneIndexBuiltinVar(nullptr),
       needsLegalization(false),
       glPerVertex(model, context, spirvContext, spirvBuilder) {}
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
-  // Try both input and output even if input location assignment failed
-  if (shaderModel.IsRay())
+  if (shaderModel.IsRay()) {
+    // No location assignment for any raytracing stage variables
     return true;
+  }
+  // Try both input and output even if input location assignment failed
   return finalizeStageIOLocations(true) & finalizeStageIOLocations(false);
 }
 
