@@ -1760,9 +1760,9 @@ private:
 
 
 /// \brief Base class for all NV raytracing instructions
-///  These include following spirv opcodes
-///  OpTraceNV, OpReportIntersectionNV, OpIgnoreIntersectionNV
-///  OpTerminateRayNV, OpExecuteCallableNV
+/// These include following spirv opcodes
+/// OpTraceNV, OpReportIntersectionNV, OpIgnoreIntersectionNV
+/// OpTerminateRayNV, OpExecuteCallableNV
 class SpirvRaytracingOpNV : public SpirvInstruction {
 public:
   SpirvRaytracingOpNV(QualType resultType, spv::Op opcode, 

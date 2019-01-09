@@ -420,7 +420,7 @@ public:
 
   void createLineInfo(SpirvString *file, uint32_t line, uint32_t column);
 
-  /// \bried Create spirv instructions for NV raytracing ops
+  /// \brief Create spirv instructions for NV raytracing ops
   SpirvInstruction
     *createRaytracingOpsNV(spv::Op opcode, QualType resultType,
                            llvm::ArrayRef<SpirvInstruction *> operands,

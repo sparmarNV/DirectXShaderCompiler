@@ -1064,12 +1064,15 @@ private:
   /// Maps a given statement to the basic block that is associated with it.
   llvm::DenseMap<const Stmt *, SpirvBasicBlock *> stmtBasicBlock;
 
-  /// Maintains mapping from a type to spirv-variable along with location decoration
+  /// Maintains mapping from a type to spirv variable along with spirv instruction
+  /// for id of location decoration
   /// Used for raytracing stage variables of storage class RayPayloadNV, CallableDataNV
   /// and HitAttributeNV
-  llvm::DenseMap<QualType, std::pair<SpirvVariable *,uint32_t>> payloadMap;
-  llvm::DenseMap<QualType, SpirvVariable*> hitAttributeMap;
-  llvm::DenseMap<QualType, std::pair<SpirvVariable*, uint32_t>> callDataMap;
+  llvm::SmallDenseMap<QualType, std::pair<SpirvInstruction *,SpirvInstruction *>, 4>
+    payloadMap;
+  llvm::SmallDenseMap<QualType, SpirvInstruction*, 4> hitAttributeMap;
+  llvm::SmallDenseMap<QualType, std::pair<SpirvInstruction*, SpirvInstruction *>, 4>
+    callDataMap;
   /// This is the Patch Constant Function. This function is not explicitly
   /// called from the entry point function.
   FunctionDecl *patchConstFunc;

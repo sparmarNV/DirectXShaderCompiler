@@ -8709,7 +8709,7 @@ SpirvEmitter::processRayBuiltins(const CallExpr *callExpr, hlsl::IntrinsicOp op)
 }
 SpirvInstruction *SpirvEmitter::processReportHit(const CallExpr *callExpr)
 {
-  SpirvVariable *hitAttributeStageVar = nullptr;
+  SpirvInstruction *hitAttributeStageVar = nullptr;
   const VarDecl *hitAttributeArg = nullptr;
   QualType hitAttributeType;
   const auto args = callExpr->getArgs();
@@ -8756,8 +8756,8 @@ SpirvInstruction *SpirvEmitter::processReportHit(const CallExpr *callExpr)
 }
 void SpirvEmitter::processCallShader(const CallExpr *callExpr)
 {
-  uint32_t callDataLocation = 0;
-  SpirvVariable* callDataStageVar = nullptr;
+  SpirvInstruction *callDataLocationInst = 0;
+  SpirvInstruction *callDataStageVar = nullptr;
   const VarDecl *callDataArg = nullptr;
   QualType callDataType;
   const auto args = callExpr->getArgs();
@@ -8772,16 +8772,19 @@ void SpirvEmitter::processCallShader(const CallExpr *callExpr)
         callDataArg = varDecl;
         //Check if same type of callable data stage variable was already
         //created, if so re-use
-        const auto iter = callDataMap.find(callDataType);
-        if (iter == callDataMap.end()) {
-          callDataLocation = callDataMap.size() + 1;
+        const auto callDataPair = callDataMap.find(callDataType);
+        if (callDataPair == callDataMap.end()) {
+          int numCallDataVars = callDataMap.size();
           callDataStageVar = declIdMapper.createRayTracingStageVar(spv::StorageClass::CallableDataNV,
             varDecl);
-          spvBuilder.decorateLocation(callDataStageVar, callDataLocation);
-          callDataMap[callDataType] = std::make_pair(callDataStageVar, callDataLocation);
+          //Decorate unique location id for each created stage var
+          spvBuilder.decorateLocation(callDataStageVar, numCallDataVars);
+          callDataLocationInst = spvBuilder.getConstantInt(astContext.UnsignedIntTy,
+            llvm::APInt(32, numCallDataVars));
+          callDataMap[callDataType] = std::make_pair(callDataStageVar, callDataLocationInst);
         } else {
-          callDataStageVar = iter->second.first;
-          callDataLocation = iter->second.second;
+          callDataStageVar = callDataPair->second.first;
+          callDataLocationInst = callDataPair->second.second;
         }
       }
     }
@@ -8789,9 +8792,6 @@ void SpirvEmitter::processCallShader(const CallExpr *callExpr)
 
   assert(callDataStageVar && callDataArg);
 
-  // Constant instruction containing location id
-  SpirvInstruction *callDataLocationInst = spvBuilder.getConstantInt(astContext.UnsignedIntTy,
-                                          llvm::APInt(32, callDataLocation));
 
   //Copy argument to stage variable
   const auto callDataArgInst = declIdMapper.getDeclEvalInfo(callDataArg);
@@ -8814,8 +8814,8 @@ void SpirvEmitter::processCallShader(const CallExpr *callExpr)
 }
 void SpirvEmitter::processTraceRay(const CallExpr *callExpr)
 {
-  uint32_t payloadLocation = 0;
-  SpirvVariable *payloadStageVar = nullptr;
+  SpirvInstruction *payloadLocationInst = 0;
+  SpirvInstruction *payloadStageVar = nullptr;
   const VarDecl *payloadArg = nullptr;
   QualType payloadType;
 
@@ -8838,19 +8838,23 @@ void SpirvEmitter::processTraceRay(const CallExpr *callExpr)
       if (const auto *varDecl = dyn_cast<VarDecl>(arg->getDecl())) {
         payloadType = varDecl->getType();
         payloadArg  = varDecl;
-        const auto iter = payloadMap.find(payloadType);
+        const auto payloadPair = payloadMap.find(payloadType);
         //Check if same type of payload stage variable was already
         //created, if so re-use
-        if (iter == payloadMap.end()) {
-          payloadLocation = payloadMap.size() + 1;
+        if (payloadPair == payloadMap.end()) {
+          int numPayloadVars = payloadMap.size();
           payloadStageVar = declIdMapper.createRayTracingStageVar(spv::StorageClass::RayPayloadNV,
                                          varDecl);
-          spvBuilder.decorateLocation(payloadStageVar, payloadLocation);
-          payloadMap[payloadType] = std::make_pair(payloadStageVar, payloadLocation);
+          //Decorate unique location id for each created stage var
+          spvBuilder.decorateLocation(payloadStageVar, numPayloadVars);
+          payloadLocationInst = spvBuilder.getConstantInt
+          (astContext.UnsignedIntTy,
+            llvm::APInt(32, numPayloadVars));
+          payloadMap[payloadType] = std::make_pair(payloadStageVar, payloadLocationInst);
         }
         else {
-          payloadStageVar = iter->second.first;
-          payloadLocation  = iter->second.second;
+          payloadStageVar = payloadPair->second.first;
+          payloadLocationInst  = payloadPair->second.second;
         }
       }
     }
@@ -8871,11 +8875,6 @@ void SpirvEmitter::processTraceRay(const CallExpr *callExpr)
     spvBuilder.createCompositeExtract(vecType, rayDescArg, { 2 });
   const auto tMax = 
     spvBuilder.createCompositeExtract(floatType, rayDescArg, { 3 });
-
-  //Constant instruction of payload location id
-  SpirvInstruction *payloadLocationInst = spvBuilder.getConstantInt
-                                          (astContext.UnsignedIntTy,
-                                          llvm::APInt(32, payloadLocation));
 
   //Copy argument to stage variable
   const auto payloadArgInst = declIdMapper.getDeclEvalInfo(payloadArg);
@@ -9525,19 +9524,13 @@ bool SpirvEmitter::emitEntryFunctionWrapperForRaytracing(const FunctionDecl *dec
   spvBuilder.createFunctionCall(retType, entryFuncInstr, params);
 
   // Write certain output variables back
-  for (uint32_t i = 0; i < decl->getNumParams(); ++i) {
-    if (sKind == hlsl::ShaderModel::Kind::RayGeneration) {
-      assert("Raygeneration shaders have no arguments of entry function");
-    } else if (sKind == hlsl::ShaderModel::Kind::Intersection) {
-      assert("Intersection shaders have no arguments of entry function");
-    } else if (sKind == hlsl::ShaderModel::Kind::ClosestHit ||
-               sKind == hlsl::ShaderModel::Kind::AnyHit ||
-               sKind == hlsl::ShaderModel::Kind::Miss ||
-               sKind == hlsl::ShaderModel::Kind::Callable) {
-        // Write back results to IncomingRayPayloadNV/IncomingCallableDataNV
-        auto *tempLoad = spvBuilder.createLoad(paramTypes[0], params[0]);
-        spvBuilder.createStore(stageVars[0], tempLoad);
-    }
+  if (sKind == hlsl::ShaderModel::Kind::ClosestHit ||
+      sKind == hlsl::ShaderModel::Kind::AnyHit ||
+      sKind == hlsl::ShaderModel::Kind::Miss ||
+      sKind == hlsl::ShaderModel::Kind::Callable) {
+      // Write back results to IncomingRayPayloadNV/IncomingCallableDataNV
+      auto *tempLoad = spvBuilder.createLoad(paramTypes[0], params[0]);
+      spvBuilder.createStore(stageVars[0], tempLoad);
   }
 
   spvBuilder.createReturn();
