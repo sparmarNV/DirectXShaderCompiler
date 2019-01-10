@@ -1260,11 +1260,11 @@ void CGMSHLSLRuntime::AddHLSLFunctionInfo(Function *F, const FunctionDecl *FD) {
         DiagnosticsEngine::Error, "Invalid profile for shader attribute");
       Diags.Report(Attr->getLocation(), DiagID);
     }
-    if (isEntry && isRay) {
-      unsigned DiagID = Diags.getCustomDiagID(
-        DiagnosticsEngine::Error, "Ray function cannot be used as a global entry point");
-      Diags.Report(Attr->getLocation(), DiagID);
-    }
+    //if (isEntry && isRay) {
+    //  unsigned DiagID = Diags.getCustomDiagID(
+    //    DiagnosticsEngine::Error, "Ray function cannot be used as a global entry point");
+    //  Diags.Report(Attr->getLocation(), DiagID);
+    //}
   }
 
   // Save patch constant function to patchConstantFunctionMap.

@@ -406,6 +406,66 @@ DXIL::SigPointKind SigPointFromInputQual(DxilParamInputQual Q, DXIL::ShaderKind 
       break;
     }
     break;
+  case DXIL::ShaderKind::RayGeneration:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::RGenIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::RGenOut;
+    default:
+      break;
+    }
+    break;
+  case DXIL::ShaderKind::Intersection:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::ISecIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::ISecOut;
+    default:
+      break;
+    }
+    break;
+  case DXIL::ShaderKind::AnyHit:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::AHitIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::AHitOut;
+    default:
+      break;
+    }
+    break;
+  case DXIL::ShaderKind::ClosestHit:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::CHitIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::CHitOut;
+    default:
+      break;
+    }
+    break;
+  case DXIL::ShaderKind::Miss:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::MissIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::MissOut;
+    default:
+      break;
+    }
+    break;
+  case DXIL::ShaderKind::Callable:
+    switch (Q) {
+    case DxilParamInputQual::In:
+      return DXIL::SigPointKind::CallableIn;
+    case DxilParamInputQual::Out:
+      return DXIL::SigPointKind::CallableOut;
+    default:
+      break;
+    }
+    break;
   default:
     break;
   }
