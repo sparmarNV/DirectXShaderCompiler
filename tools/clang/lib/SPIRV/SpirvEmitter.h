@@ -637,7 +637,7 @@ private:
   /// create specific module scoped stage variables and perform copies to them
   /// The wrapper function is also responsible for initializing global static
   /// variables for some cases.
-  bool emitEntryFunctionWrapperForRaytracing(const FunctionDecl *entryFunction,
+  bool emitEntryFunctionWrapperForRayTracing(const FunctionDecl *entryFunction,
                                 SpirvFunction *entryFuncId);
   /// \brief Performs the following operations for the Hull shader:
   /// * Creates an output variable which is an Array containing results for all

@@ -116,7 +116,7 @@ public:
     IK_UnaryOp,                   // Unary operations
     IK_VectorShuffle,             // OpVectorShuffle
     IK_ArrayLength,               // OpArrayLength
-    IK_RaytracingOpNV,            // NV raytracing ops
+    IK_RayTracingOpNV,            // NV raytracing ops
   };
 
   virtual ~SpirvInstruction() = default;
@@ -1763,18 +1763,18 @@ private:
 /// These include following spirv opcodes
 /// OpTraceNV, OpReportIntersectionNV, OpIgnoreIntersectionNV
 /// OpTerminateRayNV, OpExecuteCallableNV
-class SpirvRaytracingOpNV : public SpirvInstruction {
+class SpirvRayTracingOpNV : public SpirvInstruction {
 public:
-  SpirvRaytracingOpNV(QualType resultType, spv::Op opcode, 
+  SpirvRayTracingOpNV(QualType resultType, spv::Op opcode,
                       llvm::ArrayRef<SpirvInstruction *> vecOperands,
                       SourceLocation loc);
 
   // For LLVM-style RTTI
   static bool classof(const SpirvInstruction *inst) {
-    return inst->getKind() == IK_RaytracingOpNV;
+    return inst->getKind() == IK_RayTracingOpNV;
   }
 
-  DECLARE_INVOKE_VISITOR_FOR_CLASS(SpirvRaytracingOpNV)
+  DECLARE_INVOKE_VISITOR_FOR_CLASS(SpirvRayTracingOpNV)
 
   llvm::ArrayRef<SpirvInstruction *> getOperands() const { return operands; }
 

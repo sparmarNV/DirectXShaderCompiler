@@ -113,7 +113,7 @@ public:
   DEFINE_VISIT_METHOD(SpirvUnaryOp)
   DEFINE_VISIT_METHOD(SpirvVectorShuffle)
   DEFINE_VISIT_METHOD(SpirvArrayLength)
-  DEFINE_VISIT_METHOD(SpirvRaytracingOpNV)
+  DEFINE_VISIT_METHOD(SpirvRayTracingOpNV)
 
 #undef DEFINE_VISIT_METHOD
 

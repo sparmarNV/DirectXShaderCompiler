@@ -422,7 +422,7 @@ public:
 
   /// \brief Create spirv instructions for NV raytracing ops
   SpirvInstruction
-    *createRaytracingOpsNV(spv::Op opcode, QualType resultType,
+    *createRayTracingOpsNV(spv::Op opcode, QualType resultType,
                            llvm::ArrayRef<SpirvInstruction *> operands,
                            SourceLocation loc);
 

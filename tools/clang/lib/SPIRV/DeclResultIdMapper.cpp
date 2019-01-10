@@ -2850,7 +2850,8 @@ void DeclResultIdMapper::createRayTracingImplicitVar(const VarDecl *varDecl)
 {
   APValue *val = varDecl->evaluateValue();
   assert(val);
-  SpirvInstruction *constVal = spvBuilder.getConstantInt(astContext.UnsignedIntTy, val->getInt());
+  SpirvInstruction *constVal =
+    spvBuilder.getConstantInt(astContext.UnsignedIntTy, val->getInt());
   constVal->setRValue(true);
   astDecls[varDecl].instr = constVal;
 }

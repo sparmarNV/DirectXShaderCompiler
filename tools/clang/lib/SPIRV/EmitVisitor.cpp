@@ -968,7 +968,7 @@ bool EmitVisitor::visit(SpirvArrayLength *inst) {
   return true;
 }
 
-bool EmitVisitor::visit(SpirvRaytracingOpNV *inst) {
+bool EmitVisitor::visit(SpirvRayTracingOpNV *inst) {
   initInstruction(inst);
   if (inst->hasResultType()) {
     curInst.push_back(inst->getResultTypeId());
