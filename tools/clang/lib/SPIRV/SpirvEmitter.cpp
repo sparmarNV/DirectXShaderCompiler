@@ -9228,12 +9228,6 @@ SpirvEmitter::getSpirvShaderStage(const hlsl::ShaderModel *model) {
   // gs_<version>         : Geometry Shader  : Geometry Shader
   // ps_<version>         : Pixel Shader     : Fragment Shader
   // cs_<version>         : Compute Shader   : Compute Shader
-  // rgen_<version>       : Raygeneration Shader : RayGenerationNV Shader
-  // isec_<version>       : Intersection Shader  : IntersectionNV Shader
-  // chit_<version>       : Closest-Hit Shader   : ClosestHitNV Shader
-  // ahit_<version>       : Any-Hit Shader       : AnyHitNV Shader
-  // miss_<version>       : Miss Shader          : MissNV Shader
-  // call_<version>       : Callable Shader      : CallableNV Shader
   switch (model->GetKind()) {
   case hlsl::ShaderModel::Kind::Vertex:
     return spv::ExecutionModel::Vertex;

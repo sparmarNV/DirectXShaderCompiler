@@ -651,12 +651,6 @@ void DxilModule::SetShaderProperties(DxilFunctionProps *props) {
   case DXIL::ShaderKind::Domain:
   case DXIL::ShaderKind::Hull:
   case DXIL::ShaderKind::Vertex:
-  case DXIL::ShaderKind::RayGeneration:
-  case DXIL::ShaderKind::Intersection:
-  case DXIL::ShaderKind::AnyHit:
-  case DXIL::ShaderKind::ClosestHit:
-  case DXIL::ShaderKind::Miss:
-  case DXIL::ShaderKind::Callable:
     break;
   default: {
     DXASSERT(props->shaderKind == DXIL::ShaderKind::Geometry,
