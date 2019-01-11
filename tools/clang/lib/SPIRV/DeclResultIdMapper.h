@@ -259,7 +259,7 @@ private:
 /// stage variables per Vulkan's requirements.
 class DeclResultIdMapper {
 public:
-  inline DeclResultIdMapper(const hlsl::ShaderModel &stage, ASTContext &context,
+  inline DeclResultIdMapper(const hlsl::ShaderModel *model, ASTContext &context,
                             SpirvContext &spirvContext,
                             SpirvBuilder &spirvBuilder, SpirvEmitter &emitter,
                             FeatureManager &features,
@@ -360,6 +360,11 @@ public:
 
   /// \brief Sets the entry function.
   void setEntryFunction(SpirvFunction *fn) { entryFunction = fn; }
+
+  /// \brief Sets the shader model.
+  void setCurrentShaderModel(const hlsl::ShaderModel *sm) {
+    currentShaderModel = sm;
+  }
 
   /// Raytracing specific functions
   /// \brief Handle specific implicit declarations present only in raytracing stages
@@ -636,7 +641,7 @@ private:
   inline bool isInputStorageClass(const StageVar &v);
 
 private:
-  const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
   SpirvBuilder &spvBuilder;
   SpirvEmitter &theEmitter;
   const SpirvCodeGenOptions &spirvOptions;
@@ -750,21 +755,21 @@ void CounterIdAliasPair::assign(const CounterIdAliasPair &srcPair,
   builder.createStore(counterVar, srcPair.get(builder, context));
 }
 
-DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel &model,
+DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel *model,
                                        ASTContext &context,
                                        SpirvContext &spirvContext,
                                        SpirvBuilder &spirvBuilder,
                                        SpirvEmitter &emitter,
                                        FeatureManager &features,
                                        const SpirvCodeGenOptions &options)
-    : shaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
+    : currentShaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
       spirvOptions(options), astContext(context), spvContext(spirvContext),
       diags(context.getDiagnostics()), entryFunction(nullptr),
       needsLegalization(false),
-      glPerVertex(model, context, spirvContext, spirvBuilder) {}
+      glPerVertex(*model, context, spirvContext, spirvBuilder) {}
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
-  if (shaderModel.IsRay()) {
+  if (currentShaderModel->IsRay()) {
     // No location assignment for any raytracing stage variables
     return true;
   }

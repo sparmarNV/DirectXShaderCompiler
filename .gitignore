@@ -68,6 +68,8 @@ tools/polly
 docs/_build
 # TAEF crash logs.
 WexLogFileOutput/*
+# build directory
+build/*
 
 #==============================================================================#
 # Files created in tree by the Go bindings.

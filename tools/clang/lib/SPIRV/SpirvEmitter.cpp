@@ -480,20 +480,20 @@ SpirvEmitter::SpirvEmitter(CompilerInstance &ci)
       diags(ci.getDiagnostics()),
       spirvOptions(ci.getCodeGenOpts().SpirvOptions),
       entryFunctionName(ci.getCodeGenOpts().HLSLEntryFunction),
-      shaderModel(*hlsl::ShaderModel::GetByName(
+      currentShaderModel(hlsl::ShaderModel::GetByName(
           ci.getCodeGenOpts().HLSLProfile.c_str())),
       spvContext(), featureManager(diags, spirvOptions),
       spvBuilder(astContext, spvContext, &featureManager, spirvOptions),
-      declIdMapper(shaderModel, astContext, spvContext, spvBuilder, *this,
+      declIdMapper(currentShaderModel, astContext, spvContext, spvBuilder, *this,
                    featureManager, spirvOptions),
       entryFunction(nullptr), curFunction(nullptr), curThis(nullptr),
       seenPushConstantAt(), isSpecConstantMode(false), needsLegalization(false),
       mainSourceFile(nullptr) {
-  if (shaderModel.GetKind() == hlsl::ShaderModel::Kind::Invalid)
-    emitError("unknown shader module: %0", {}) << shaderModel.GetName();
+  if (currentShaderModel->GetKind() == hlsl::ShaderModel::Kind::Invalid)
+    emitError("unknown shader module: %0", {}) << currentShaderModel->GetName();
 
-  if (spirvOptions.invertY && !shaderModel.IsVS() && !shaderModel.IsDS() &&
-      !shaderModel.IsGS())
+  if (spirvOptions.invertY && !currentShaderModel->IsVS() && !currentShaderModel->IsDS() &&
+      !currentShaderModel->IsGS())
     emitError("-fvk-invert-y can only be used in VS/DS/GS", {});
 
   if (spirvOptions.useGlLayout && spirvOptions.useDxLayout)
@@ -535,7 +535,7 @@ SpirvEmitter::SpirvEmitter(CompilerInstance &ci)
     source = StringRef(mainFile->getBufferStart(), mainFile->getBufferSize());
   }
   mainSourceFile = spvBuilder.setDebugSource(
-      shaderModel.GetMajor(), shaderModel.GetMinor(), fileName, source);
+      currentShaderModel->GetMajor(), currentShaderModel->GetMinor(), fileName, source);
 
   if (spirvOptions.debugInfoTool && spirvOptions.targetEnv == "vulkan1.1") {
     // Emit OpModuleProcessed to indicate the commit information.
@@ -563,8 +563,32 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   // The entry function is the seed of the queue.
   for (auto *decl : tu->decls()) {
     if (auto *funcDecl = dyn_cast<FunctionDecl>(decl)) {
-      if (funcDecl->getName() == entryFunctionName) {
-        workQueue.insert(funcDecl);
+      if (currentShaderModel->IsLib()) {
+        if (const auto *shaderAttr = funcDecl->getAttr<HLSLShaderAttr>()) {
+          // If we are compiling as a library then add everything that has a
+          // ShaderAttr
+          FunctionEntryInfo entryInfo;
+          entryInfo.hlslModel =
+              getHLSLShaderStageFromName(shaderAttr->getStage());
+          entryInfo.executionModel =
+              getSpirvShaderStage(entryInfo.hlslModel);
+          entryInfo.funcDecl = funcDecl;
+          entryInfo.entryFunction = nullptr;
+
+          entryPoints[funcDecl->getName()] = entryInfo;
+          workQueue.emplace_back(entryInfo);
+        }
+      } else {
+        if (funcDecl->getName() == entryFunctionName) {
+          FunctionEntryInfo entryInfo;
+          entryInfo.hlslModel = currentShaderModel;
+          entryInfo.executionModel = getSpirvShaderStage(currentShaderModel);
+          entryInfo.funcDecl = funcDecl;
+          entryInfo.entryFunction = nullptr;
+
+          entryPoints[funcDecl->getName()] = entryInfo;
+          workQueue.emplace_back(entryInfo);
+        }
       }
     } else {
       doDecl(decl);
@@ -575,7 +599,11 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   // The queue can grow in the meanwhile; so need to keep evaluating
   // workQueue.size().
   for (uint32_t i = 0; i < workQueue.size(); ++i) {
-    doDecl(workQueue[i]);
+    currentEntry = &workQueue[i];
+    currentShaderModel = currentEntry->hlslModel;
+    entryFunction = currentEntry->entryFunction;
+    declIdMapper.setCurrentShaderModel(currentEntry->hlslModel);
+    doDecl(currentEntry->funcDecl);
   }
 
   if (context.getDiagnostics().hasErrorOccurred())
@@ -587,8 +615,12 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   spvBuilder.setMemoryModel(spv::AddressingModel::Logical,
                             spv::MemoryModel::GLSL450);
 
-  spvBuilder.addEntryPoint(getSpirvShaderStage(shaderModel), entryFunction,
-                           entryFunctionName, declIdMapper.collectStageVars());
+  for (auto entryInfo : entryPoints) {
+    // TODO: assign specific StageVars w.r.t. to entry point
+    spvBuilder.addEntryPoint(entryInfo.second.executionModel,
+                             entryInfo.second.entryFunction, entryInfo.first,
+                             declIdMapper.collectStageVars());
+  }
 
   // Add Location decorations to stage input/output variables.
   if (!declIdMapper.decorateStageIOLocations())
@@ -959,7 +991,7 @@ void SpirvEmitter::doFunctionDecl(const FunctionDecl *decl) {
 
   SpirvFunction *func = declIdMapper.getOrRegisterFn(decl);
 
-  if (funcName == entryFunctionName) {
+  if (entryPoints.find(funcName) != entryPoints.end()) {
     funcName = "src." + funcName;
     // Create wrapper for the entry function
     if (!emitEntryFunctionWrapper(decl, func))
@@ -1049,7 +1081,7 @@ bool SpirvEmitter::validateVKAttributes(const NamedDecl *decl) {
   }
 
   if (decl->getAttr<VKInputAttachmentIndexAttr>()) {
-    if (!shaderModel.IsPS()) {
+    if (!currentShaderModel->IsPS()) {
       emitError("SubpassInput(MS) only allowed in pixel shader",
                 decl->getLocation());
       success = false;
@@ -1146,7 +1178,7 @@ void SpirvEmitter::doImplicitDecl(const Decl *decl)
   //We only handle specific implicit declaration for raytracing
   //which are RayFlag/HitKind constant unsigned integers
   //Ignore others
-  if (shaderModel.IsRay()) {
+  if (currentShaderModel->IsLib() || currentShaderModel->IsRay()) {
     const VarDecl *implDecl = dyn_cast<VarDecl>(decl);
     if (implDecl && (implDecl->getName().startswith(StringRef("RAY_FLAG")) ||
       implDecl->getName().startswith(StringRef("HIT_KIND")))) {
@@ -2020,8 +2052,21 @@ SpirvInstruction *SpirvEmitter::processCall(const CallExpr *callExpr) {
   assert(vars.size() == args.size());
 
   // Push the callee into the work queue if it is not there.
-  if (!workQueue.count(callee)) {
-    workQueue.insert(callee);
+  {
+    bool entryFound = false;
+    for (uint32_t i = 0; i < workQueue.size(); ++i) {
+      if (workQueue[i].funcDecl == callee) {
+        entryFound = true;
+      }
+    }
+    if (!entryFound) {
+      FunctionEntryInfo localEntry;
+      localEntry.hlslModel = currentEntry->hlslModel;
+      localEntry.executionModel = currentEntry->executionModel;
+      localEntry.entryFunction = nullptr;
+      localEntry.funcDecl = callee;
+      workQueue.emplace_back(localEntry);
+    }
   }
 
   const QualType retType =
@@ -3799,7 +3844,7 @@ SpirvInstruction *SpirvEmitter::createImageSample(
   const bool isExplicit = lod || (grad.first && grad.second);
 
   // Implicit-lod instructions are only allowed in pixel shader.
-  if (!shaderModel.IsPS() && !isExplicit)
+  if (!currentShaderModel->IsPS() && !isExplicit)
     needsLegalization = true;
 
   auto *retVal = spvBuilder.createImageSample(
@@ -8478,7 +8523,7 @@ SpirvEmitter::processIntrinsicF32ToF16(const CallExpr *callExpr) {
 SpirvInstruction *SpirvEmitter::processIntrinsicUsingSpirvInst(
     const CallExpr *callExpr, spv::Op opcode, bool actPerRowForMatrices) {
   // Certain opcodes are only allowed in pixel shader
-  if (!shaderModel.IsPS())
+  if (!currentShaderModel->IsPS())
     switch (opcode) {
     case spv::Op::OpDPdx:
     case spv::Op::OpDPdy:
@@ -9174,7 +9219,7 @@ SpirvConstant *SpirvEmitter::tryToEvaluateAsConst(const Expr *expr) {
 }
 
 spv::ExecutionModel
-SpirvEmitter::getSpirvShaderStage(const hlsl::ShaderModel &model) {
+SpirvEmitter::getSpirvShaderStage(const hlsl::ShaderModel *model) {
   // DXIL Models are:
   // Profile (DXIL Model) : HLSL Shader Kind : SPIR-V Shader Stage
   // vs_<version>         : Vertex Shader    : Vertex Shader
@@ -9189,7 +9234,7 @@ SpirvEmitter::getSpirvShaderStage(const hlsl::ShaderModel &model) {
   // ahit_<version>       : Any-Hit Shader       : AnyHitNV Shader
   // miss_<version>       : Miss Shader          : MissNV Shader
   // call_<version>       : Callable Shader      : CallableNV Shader
-  switch (model.GetKind()) {
+  switch (model->GetKind()) {
   case hlsl::ShaderModel::Kind::Vertex:
     return spv::ExecutionModel::Vertex;
   case hlsl::ShaderModel::Kind::Hull:
@@ -9220,10 +9265,67 @@ SpirvEmitter::getSpirvShaderStage(const hlsl::ShaderModel &model) {
   llvm_unreachable("unknown shader model");
 }
 
+const hlsl::ShaderModel *
+SpirvEmitter::getHLSLShaderStageFromName(const StringRef &model) {
+  const hlsl::ShaderModel *rv = hlsl::ShaderModel::GetByName("invalid");
+  // Stage is already validate in HandleDeclAttributeForHLSL.
+  // Here just check first letter (or two).
+  switch (model[0]) {
+  case 'c':
+    switch (model[1]) {
+    case 'o':
+      rv = hlsl::ShaderModel::GetByName("cs_6_4");
+      break;
+    case 'l':
+      rv = hlsl::ShaderModel::GetByName("chit_6_4");
+      break;
+    case 'a':
+      rv = hlsl::ShaderModel::GetByName("call_6_4");
+      break;
+    default:
+      break;
+    }
+    break;
+  case 'v':
+    rv = hlsl::ShaderModel::GetByName("vs_6_4");
+    break;
+  case 'h':
+    rv = hlsl::ShaderModel::GetByName("hs_6_4");
+    break;
+  case 'd':
+    rv = hlsl::ShaderModel::GetByName("ds_6_4");
+    break;
+  case 'g':
+    rv = hlsl::ShaderModel::GetByName("gs_6_4");
+    break;
+  case 'p':
+    rv = hlsl::ShaderModel::GetByName("ps_6_4");
+    break;
+  case 'r':
+    rv = hlsl::ShaderModel::GetByName("rgen_6_4");
+    break;
+  case 'i':
+    rv = hlsl::ShaderModel::GetByName("isec_6_4");
+    break;
+  case 'a':
+    rv = hlsl::ShaderModel::GetByName("ahit_6_4");
+    break;
+  case 'm':
+    rv = hlsl::ShaderModel::GetByName("miss_6_4");
+    break;
+  default:
+    break;
+  }
+  if (rv->GetKind() == hlsl::ShaderModel::Kind::Invalid) {
+    llvm_unreachable("Unknown shader model");
+  }
+  return rv;
+}
+
 bool SpirvEmitter::processGeometryShaderAttributes(const FunctionDecl *decl,
                                                    uint32_t *arraySize) {
   bool success = true;
-  assert(shaderModel.IsGS());
+  assert(currentShaderModel->IsGS());
   if (auto *vcAttr = decl->getAttr<HLSLMaxVertexCountAttr>()) {
     spvBuilder.addExecutionMode(
         entryFunction, spv::ExecutionMode::OutputVertices,
@@ -9349,7 +9451,7 @@ void SpirvEmitter::processComputeShaderAttributes(const FunctionDecl *decl) {
 
 bool SpirvEmitter::processTessellationShaderAttributes(
     const FunctionDecl *decl, uint32_t *numOutputControlPoints) {
-  assert(shaderModel.IsHS() || shaderModel.IsDS());
+  assert(currentShaderModel->IsHS() || currentShaderModel->IsDS());
   using namespace spv;
 
   if (auto *domain = decl->getAttr<HLSLDomainAttr>()) {
@@ -9371,7 +9473,7 @@ bool SpirvEmitter::processTessellationShaderAttributes(
 
   // Early return for domain shaders as domain shaders only takes the 'domain'
   // attribute.
-  if (shaderModel.IsDS())
+  if (currentShaderModel->IsDS())
     return true;
 
   if (auto *partitioning = decl->getAttr<HLSLPartitioningAttr>()) {
@@ -9439,20 +9541,6 @@ bool SpirvEmitter::processTessellationShaderAttributes(
 bool SpirvEmitter::emitEntryFunctionWrapperForRayTracing(const FunctionDecl *decl,
                                                         SpirvFunction *entryFuncInstr)
 {
-  // Construct the wrapper function signature.
-  auto *funcType = spvContext.getFunctionType(astContext.VoidTy, {});
-
-  // The wrapper entry function surely does not have pre-assigned <result-id>
-  // for it like other functions that got added to the work queue following
-  // function calls. And the wrapper is the entry function.
-  entryFunction =
-    spvBuilder.beginFunction(astContext.VoidTy, funcType,
-      /*SourceLocation*/{}, decl->getName());
-  // Note this should happen before using declIdMapper for other tasks.
-  declIdMapper.setEntryFunction(entryFunction);
-
-  // Handle attributes specific to each shader stage
-
   // The entry basic block.
   auto *entryLabel = spvBuilder.createBasicBlock();
   spvBuilder.setInsertPoint(entryLabel);
@@ -9478,7 +9566,7 @@ bool SpirvEmitter::emitEntryFunctionWrapperForRayTracing(const FunctionDecl *dec
   llvm::SmallVector<SpirvInstruction *, 4> params;
   llvm::SmallVector<QualType, 4> paramTypes;
   llvm::SmallVector<SpirvInstruction *, 4> stageVars;
-  hlsl::ShaderModel::Kind sKind = shaderModel.GetKind();
+  hlsl::ShaderModel::Kind sKind = currentShaderModel->GetKind();
   for (uint32_t i = 0; i < decl->getNumParams(); i++) {
     const auto param = decl->getParamDecl(i);
     const auto paramType = param->getType();
@@ -9547,10 +9635,6 @@ bool SpirvEmitter::emitEntryFunctionWrapperForRayTracing(const FunctionDecl *dec
 }
 bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
                                             SpirvFunction *entryFuncInstr) {
-
-  if (shaderModel.IsRay()) {
-    return emitEntryFunctionWrapperForRayTracing(decl, entryFuncInstr);
-  }
   // HS specific attributes
   uint32_t numOutputControlPoints = 0;
   SpirvInstruction *outputControlPointIdVal =
@@ -9577,12 +9661,20 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
   // Note this should happen before using declIdMapper for other tasks.
   declIdMapper.setEntryFunction(entryFunction);
 
+  // Set entryFunction for current entry point
+  auto entryInfo = entryPoints.find(decl->getName());
+  entryInfo->second.entryFunction = entryFunction;
+
+  if (currentShaderModel->IsRay()) {
+    return emitEntryFunctionWrapperForRayTracing(decl, entryFuncInstr);
+  }
+
   // Handle attributes specific to each shader stage
-  if (shaderModel.IsPS()) {
+  if (currentShaderModel->IsPS()) {
     processPixelShaderAttributes(decl);
-  } else if (shaderModel.IsCS()) {
+  } else if (currentShaderModel->IsCS()) {
     processComputeShaderAttributes(decl);
-  } else if (shaderModel.IsHS()) {
+  } else if (currentShaderModel->IsHS()) {
     if (!processTessellationShaderAttributes(decl, &numOutputControlPoints))
       return false;
 
@@ -9594,7 +9686,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
       }
 
     outputArraySize = numOutputControlPoints;
-  } else if (shaderModel.IsDS()) {
+  } else if (currentShaderModel->IsDS()) {
     if (!processTessellationShaderAttributes(decl, &numOutputControlPoints))
       return false;
 
@@ -9605,7 +9697,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
         break;
       }
     // The per-vertex output of DS is not an array.
-  } else if (shaderModel.IsGS()) {
+  } else if (currentShaderModel->IsGS()) {
     if (!processGeometryShaderAttributes(decl, &inputArraySize))
       return false;
     // The per-vertex output of GS is not an array.
@@ -9637,7 +9729,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
   // offset of SV_ClipDistance/SV_CullDistance variables within the array.
   declIdMapper.glPerVertex.calculateClipCullDistanceArraySize();
 
-  if (!shaderModel.IsCS()) {
+  if (!currentShaderModel->IsCS()) {
     // Generate stand-alone builtins of Position, ClipDistance, and
     // CullDistance, which belongs to gl_PerVertex.
     declIdMapper.glPerVertex.generateVars(inputArraySize, outputArraySize);
@@ -9679,7 +9771,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
     // Also do not create input variables for output stream objects of geometry
     // shaders (e.g. TriangleStream) which are required to be marked as 'inout'.
     if (canActAsInParmVar(param)) {
-      if (shaderModel.IsHS() && hlsl::IsHLSLInputPatchType(paramType)) {
+      if (currentShaderModel->IsHS() && hlsl::IsHLSLInputPatchType(paramType)) {
         // Record the temporary variable holding InputPatch. It may be used
         // later in the patch constant function.
         hullMainInputPatchParam = tempVar;
@@ -9717,7 +9809,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
   //    to the proper offset in the array.
   // 2- The patch constant function must be called *once* after all invocations
   //    of the main entry point function is done.
-  if (shaderModel.IsHS()) {
+  if (currentShaderModel->IsHS()) {
     // Create stage output variables out of the return type.
     if (!declIdMapper.createStageOutputVar(decl, numOutputControlPoints,
                                            outputControlPointIdVal, retVal))
@@ -9746,7 +9838,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
       // Write back of stage output variables in GS is manually controlled by
       // .Append() intrinsic method. No need to load the parameter since we
       // won't need to write back here.
-      if (param->isUsed() && !shaderModel.IsGS())
+      if (param->isUsed() && !currentShaderModel->IsGS())
         loadedParam = spvBuilder.createLoad(param->getType(), params[i]);
 
       if (!declIdMapper.createStageOutputVar(param, loadedParam, false))
@@ -9759,7 +9851,7 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
 
   // For Hull shaders, there is no explicit call to the PCF in the HLSL source.
   // We should invoke a translation of the PCF manually.
-  if (shaderModel.IsHS())
+  if (currentShaderModel->IsHS())
     doDecl(patchConstFunc);
 
   return true;
@@ -9771,7 +9863,7 @@ bool SpirvEmitter::processHSEntryPointOutputAndPCF(
     SpirvInstruction *outputControlPointId, SpirvInstruction *primitiveId,
     SpirvInstruction *viewId, SpirvInstruction *hullMainInputPatch) {
   // This method may only be called for Hull shaders.
-  assert(shaderModel.IsHS());
+  assert(currentShaderModel->IsHS());
 
   // For Hull shaders, the real output is an array of size
   // numOutputControlPoints. The results of the main should be written to the

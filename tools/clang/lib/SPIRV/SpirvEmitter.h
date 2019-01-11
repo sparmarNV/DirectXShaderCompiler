@@ -592,7 +592,9 @@ private:
   spv::LoopControlMask translateLoopAttribute(const Stmt *, const Attr &);
 
   static spv::ExecutionModel
-  getSpirvShaderStage(const hlsl::ShaderModel &model);
+  getSpirvShaderStage(const hlsl::ShaderModel *model);
+  const hlsl::ShaderModel *
+  getHLSLShaderStageFromName(const StringRef &model);
 
   /// \brief Adds necessary execution modes for the hull/domain shaders based on
   /// the HLSL attributes of the entry point function.
@@ -979,18 +981,27 @@ private:
   /// Entry function name and shader stage. Both of them are derived from the
   /// command line and should be const.
   const llvm::StringRef entryFunctionName;
-  const hlsl::ShaderModel &shaderModel;
+  const hlsl::ShaderModel *currentShaderModel;
 
   SpirvContext spvContext;
   FeatureManager featureManager;
   SpirvBuilder spvBuilder;
   DeclResultIdMapper declIdMapper;
 
-  /// A queue of decls reachable from the entry function. Decls inserted into
-  /// this queue will persist to avoid duplicated translations. And we'd like
-  /// a deterministic order of iterating the queue for finding the next decl
-  /// to translate. So we need SetVector here.
-  llvm::SetVector<const DeclaratorDecl *> workQueue;
+  struct FunctionEntryInfo {
+    const hlsl::ShaderModel *hlslModel;
+    spv::ExecutionModel executionModel;
+    SpirvFunction *entryFunction;
+    const DeclaratorDecl *funcDecl;
+  };
+  const FunctionEntryInfo *currentEntry;
+  llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;
+
+  /// A queue of FunctionEntryInfo reachable from all the entry functions.
+  /// EntryInfo inserted into this queue will persist to avoid duplicated
+  /// translations. And we'd like a deterministic order of iterating the queue
+  /// for finding the next function to translate. So we need SetVector here.
+  llvm::SmallVector<FunctionEntryInfo, 8> workQueue;
 
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.
