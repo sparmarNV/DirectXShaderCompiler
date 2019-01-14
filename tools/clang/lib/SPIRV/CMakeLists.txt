@@ -19,6 +19,7 @@ add_clang_library(clangSPIRV
   SpirvBuilder.cpp
   SpirvContext.cpp
   SpirvEmitter.cpp
+  SpirvExecutionModel.cpp
   SpirvFunction.cpp
   SpirvInstruction.cpp
   SpirvModule.cpp

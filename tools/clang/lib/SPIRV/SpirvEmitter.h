@@ -36,6 +36,7 @@
 
 #include "DeclResultIdMapper.h"
 #include "SpirvEvalInfo.h"
+#include "SpirvExecutionModel.h" 
 
 namespace clang {
 namespace spirv {
@@ -981,20 +982,22 @@ private:
   /// Entry function name and shader stage. Both of them are derived from the
   /// command line and should be const.
   const llvm::StringRef entryFunctionName;
-  const hlsl::ShaderModel *currentShaderModel;
+  const hlsl::ShaderModel shaderModel;
+
+  // Maintains record of all entry functions with execution model
+  // and reachable functions
+  struct FunctionEntryInfo {
+    const SpirvExecutionModel *spvExecModel;
+    SpirvFunction *entryFunction;
+    const DeclaratorDecl *funcDecl;
+  };
+  const SpirvExecutionModel *spvExecModel;
 
   SpirvContext spvContext;
   FeatureManager featureManager;
   SpirvBuilder spvBuilder;
   DeclResultIdMapper declIdMapper;
 
-  struct FunctionEntryInfo {
-    const hlsl::ShaderModel *hlslModel;
-    spv::ExecutionModel executionModel;
-    SpirvFunction *entryFunction;
-    const DeclaratorDecl *funcDecl;
-  };
-  const FunctionEntryInfo *currentEntry;
   llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;
 
   /// A queue of FunctionEntryInfo reachable from all the entry functions.

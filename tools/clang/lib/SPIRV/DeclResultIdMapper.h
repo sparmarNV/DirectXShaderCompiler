@@ -27,6 +27,7 @@
 
 #include "GlPerVertex.h"
 #include "SpirvEvalInfo.h"
+#include "SpirvExecutionModel.h" 
 
 namespace clang {
 namespace spirv {
@@ -259,11 +260,12 @@ private:
 /// stage variables per Vulkan's requirements.
 class DeclResultIdMapper {
 public:
-  inline DeclResultIdMapper(const hlsl::ShaderModel *model, ASTContext &context,
+  inline DeclResultIdMapper(const hlsl::ShaderModel &model, ASTContext &context,
                             SpirvContext &spirvContext,
                             SpirvBuilder &spirvBuilder, SpirvEmitter &emitter,
                             FeatureManager &features,
-                            const SpirvCodeGenOptions &spirvOptions);
+                            const SpirvCodeGenOptions &spirvOptions,
+                            const SpirvExecutionModel *em);
 
   /// \brief Returns the SPIR-V builtin variable.
   SpirvVariable *getBuiltinVar(spv::BuiltIn builtIn, QualType type, SourceLocation);
@@ -361,9 +363,10 @@ public:
   /// \brief Sets the entry function.
   void setEntryFunction(SpirvFunction *fn) { entryFunction = fn; }
 
-  /// \brief Sets the shader model.
-  void setCurrentShaderModel(const hlsl::ShaderModel *sm) {
-    currentShaderModel = sm;
+  /// \brief Sets the spirv execution model
+  void setSpvExecutionModel(const SpirvExecutionModel *em) {
+    glPerVertex.setSpvExecutionModel(em);
+    spvExecModel = em;
   }
 
   /// Raytracing specific functions
@@ -641,7 +644,7 @@ private:
   inline bool isInputStorageClass(const StageVar &v);
 
 private:
-  const hlsl::ShaderModel *currentShaderModel;
+  const hlsl::ShaderModel shaderModel;
   SpirvBuilder &spvBuilder;
   SpirvEmitter &theEmitter;
   const SpirvCodeGenOptions &spirvOptions;
@@ -649,6 +652,7 @@ private:
   SpirvContext &spvContext;
   DiagnosticsEngine &diags;
   SpirvFunction *entryFunction;
+  const SpirvExecutionModel *spvExecModel;
 
   /// Mapping of all Clang AST decls to their instruction pointers.
   llvm::DenseMap<const ValueDecl *, DeclSpirvInfo> astDecls;
@@ -755,21 +759,22 @@ void CounterIdAliasPair::assign(const CounterIdAliasPair &srcPair,
   builder.createStore(counterVar, srcPair.get(builder, context));
 }
 
-DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel *model,
+DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel &model,
                                        ASTContext &context,
                                        SpirvContext &spirvContext,
                                        SpirvBuilder &spirvBuilder,
                                        SpirvEmitter &emitter,
                                        FeatureManager &features,
-                                       const SpirvCodeGenOptions &options)
-    : currentShaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
+                                       const SpirvCodeGenOptions &options,
+                                       const SpirvExecutionModel *execModel)
+    : shaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
       spirvOptions(options), astContext(context), spvContext(spirvContext),
       diags(context.getDiagnostics()), entryFunction(nullptr),
-      needsLegalization(false),
-      glPerVertex(*model, context, spirvContext, spirvBuilder) {}
+      spvExecModel(execModel), needsLegalization(false),
+      glPerVertex(execModel, context, spirvContext, spirvBuilder) {}
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
-  if (currentShaderModel->IsRay()) {
+  if (spvExecModel->IsRay()) {
     // No location assignment for any raytracing stage variables
     return true;
   }
