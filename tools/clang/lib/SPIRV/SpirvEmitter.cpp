@@ -8703,13 +8703,13 @@ SpirvEmitter::processRayBuiltins(const CallExpr *callExpr, hlsl::IntrinsicOp op)
     builtin = spv::BuiltIn::ObjectRayOriginNV;
     break;
   case hlsl::IntrinsicOp::IOP_InstanceIndex:
-    builtin = spv::BuiltIn::InstanceCustomIndexNV;
+    builtin = spv::BuiltIn::InstanceId;
     break;
   case hlsl::IntrinsicOp::IOP_PrimitiveIndex:
     builtin = spv::BuiltIn::PrimitiveId;
     break;
   case hlsl::IntrinsicOp::IOP_InstanceID:
-    builtin = spv::BuiltIn::InstanceId;
+    builtin = spv::BuiltIn::InstanceCustomIndexNV;
     break;
   case hlsl::IntrinsicOp::IOP_RayFlags:
     builtin = spv::BuiltIn::IncomingRayFlagsNV;

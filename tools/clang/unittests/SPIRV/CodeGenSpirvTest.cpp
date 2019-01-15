@@ -1753,4 +1753,23 @@ TEST_F(FileTest, LegalizationExample21) {
   runFileTest("legal-examples/21-combined-ok.hlsl");
 }
 
+// === Raytracing NV examples ===
+TEST_F(FileTest, RayTracingNVRaygen) {
+  runFileTest("raytracing.nv.raygen.hlsl");
+}
+TEST_F(FileTest, RayTracingNVIntersection) {
+  runFileTest("raytracing.nv.intersection.hlsl");
+}
+TEST_F(FileTest, RayTracingNVAnyHit) {
+  runFileTest("raytracing.nv.anyhit.hlsl");
+}
+TEST_F(FileTest, RayTracingNVClosestHit) {
+  runFileTest("raytracing.nv.closesthit.hlsl");
+}
+TEST_F(FileTest, RayTracingNVMiss) {
+  runFileTest("raytracing.nv.miss.hlsl");
+}
+TEST_F(FileTest, RayTracingNVCallable) {
+  runFileTest("raytracing.nv.callable.hlsl");
+}
 } // namespace
