@@ -986,10 +986,11 @@ private:
 
   // Maintains record of all entry functions with execution model
   // and reachable functions
-  struct FunctionEntryInfo {
+  struct FunctionInfo {
     const SpirvExecutionModel *spvExecModel;
-    SpirvFunction *entryFunction;
     const DeclaratorDecl *funcDecl;
+    SpirvFunction *entryFunction;
+    bool isEntryFunction;
   };
   const SpirvExecutionModel *spvExecModel;
 
@@ -998,13 +999,15 @@ private:
   SpirvBuilder spvBuilder;
   DeclResultIdMapper declIdMapper;
 
-  llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;
+  // A map of funcDecl to its FunctionInfo. Consists of all entry functions
+  // followed by all reachable functions from the entry functions.
+  llvm::DenseMap<const DeclaratorDecl *, FunctionInfo *> functionInfoMap;
 
-  /// A queue of FunctionEntryInfo reachable from all the entry functions.
-  /// EntryInfo inserted into this queue will persist to avoid duplicated
+  /// A queue of FunctionInfo reachable from all the entry functions.
+  /// FunctionInfo inserted into this queue will persist to avoid duplicated
   /// translations. And we'd like a deterministic order of iterating the queue
   /// for finding the next function to translate. So we need SetVector here.
-  llvm::SmallVector<FunctionEntryInfo, 8> workQueue;
+  llvm::SetVector<const FunctionInfo *> workQueue;
 
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.

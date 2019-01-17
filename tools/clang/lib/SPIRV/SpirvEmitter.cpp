@@ -560,6 +560,7 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
     return;
 
   TranslationUnitDecl *tu = context.getTranslationUnitDecl();
+  uint32_t numEntryPoints = 0;
 
   // The entry function is the seed of the queue.
   for (auto *decl : tu->decls()) {
@@ -568,25 +569,29 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
         if (const auto *shaderAttr = funcDecl->getAttr<HLSLShaderAttr>()) {
           // If we are compiling as a library then add everything that has a
           // ShaderAttr
-          FunctionEntryInfo entryInfo;
-          entryInfo.spvExecModel =
+          FunctionInfo *entryInfo = new FunctionInfo();
+          entryInfo->spvExecModel =
               SpirvExecutionModel::GetByStageName(shaderAttr->getStage());
-          entryInfo.funcDecl = funcDecl;
-          entryInfo.entryFunction = nullptr;
+          entryInfo->funcDecl = funcDecl;
+          entryInfo->entryFunction = nullptr;
+          entryInfo->isEntryFunction = true;
 
-          entryPoints[funcDecl->getName()] = entryInfo;
-          workQueue.emplace_back(entryInfo);
+          functionInfoMap[funcDecl] = entryInfo;
+          workQueue.insert(entryInfo);
+          numEntryPoints++;
         }
       } else {
         if (funcDecl->getName() == entryFunctionName) {
-          FunctionEntryInfo entryInfo;
-          entryInfo.spvExecModel =
+          FunctionInfo *entryInfo = new FunctionInfo();
+          entryInfo->spvExecModel =
               SpirvExecutionModel::GetByShaderKind(shaderModel.GetKind());
-          entryInfo.funcDecl = funcDecl;
-          entryInfo.entryFunction = nullptr;
+          entryInfo->funcDecl = funcDecl;
+          entryInfo->entryFunction = nullptr;
+          entryInfo->isEntryFunction = true;
 
-          entryPoints[funcDecl->getName()] = entryInfo;
-          workQueue.emplace_back(entryInfo);
+          functionInfoMap[funcDecl] = entryInfo;
+          workQueue.insert(entryInfo);
+          numEntryPoints++;
         }
       }
     } else {
@@ -598,11 +603,11 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   // The queue can grow in the meanwhile; so need to keep evaluating
   // workQueue.size().
   for (uint32_t i = 0; i < workQueue.size(); ++i) {
-    FunctionEntryInfo *currentEntry = &workQueue[i];
-    declIdMapper.setSpvExecutionModel(currentEntry->spvExecModel);
-    spvExecModel = currentEntry->spvExecModel;
-    entryFunction = currentEntry->entryFunction;
-    doDecl(currentEntry->funcDecl);
+    const FunctionInfo *curEntryOrFunc = workQueue[i];
+    declIdMapper.setSpvExecutionModel(curEntryOrFunc->spvExecModel);
+    spvExecModel = curEntryOrFunc->spvExecModel;
+    entryFunction = curEntryOrFunc->entryFunction;
+    doDecl(curEntryOrFunc->funcDecl);
   }
 
   if (context.getDiagnostics().hasErrorOccurred())
@@ -614,11 +619,14 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   spvBuilder.setMemoryModel(spv::AddressingModel::Logical,
                             spv::MemoryModel::GLSL450);
 
-  for (auto entryInfo : entryPoints) {
+  assert(numEntryPoints <= workQueue.size());
+  for (uint32_t i = 0; i < numEntryPoints; ++i) {
     // TODO: assign specific StageVars w.r.t. to entry point
-    spvBuilder.addEntryPoint(entryInfo.second.spvExecModel->GetExecutionModel(),
-                             entryInfo.second.entryFunction, entryInfo.first,
-                             declIdMapper.collectStageVars());
+    const FunctionInfo *entryInfo = workQueue[i];
+    assert(entryInfo->isEntryFunction);
+    spvBuilder.addEntryPoint(
+        entryInfo->spvExecModel->GetExecutionModel(), entryInfo->entryFunction,
+        entryInfo->funcDecl->getName(), declIdMapper.collectStageVars());
   }
 
   // Add Location decorations to stage input/output variables.
@@ -990,7 +998,8 @@ void SpirvEmitter::doFunctionDecl(const FunctionDecl *decl) {
 
   SpirvFunction *func = declIdMapper.getOrRegisterFn(decl);
 
-  if (entryPoints.find(funcName) != entryPoints.end()) {
+  auto entryInfo = functionInfoMap.lookup(decl);
+  if (entryInfo && entryInfo->isEntryFunction) {
     funcName = "src." + funcName;
     // Create wrapper for the entry function
     if (!emitEntryFunctionWrapper(decl, func))
@@ -2051,20 +2060,14 @@ SpirvInstruction *SpirvEmitter::processCall(const CallExpr *callExpr) {
   assert(vars.size() == args.size());
 
   // Push the callee into the work queue if it is not there.
-  {
-    bool entryFound = false;
-    for (uint32_t i = 0; i < workQueue.size(); ++i) {
-      if (workQueue[i].funcDecl == callee) {
-        entryFound = true;
-      }
-    }
-    if (!entryFound) {
-      FunctionEntryInfo localEntry;
-      localEntry.spvExecModel = spvExecModel;
-      localEntry.entryFunction = nullptr;
-      localEntry.funcDecl = callee;
-      workQueue.emplace_back(localEntry);
-    }
+  if (functionInfoMap.find(callee) == functionInfoMap.end()) {
+    FunctionInfo *calleeInfo = new FunctionInfo;
+    calleeInfo->spvExecModel = spvExecModel;
+    calleeInfo->funcDecl = callee;
+    calleeInfo->entryFunction = nullptr;
+    calleeInfo->isEntryFunction = false;
+    functionInfoMap[callee] = calleeInfo;
+    workQueue.insert(calleeInfo);
   }
 
   const QualType retType =
@@ -9654,8 +9657,9 @@ bool SpirvEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
   declIdMapper.setEntryFunction(entryFunction);
 
   // Set entryFunction for current entry point
-  auto entryInfo = entryPoints.find(decl->getName());
-  entryInfo->second.entryFunction = entryFunction;
+  auto entryInfo = functionInfoMap.lookup(decl);
+  assert(entryInfo && entryInfo->isEntryFunction);
+  entryInfo->entryFunction = entryFunction;
 
   if (spvExecModel->IsRay()) {
     return emitEntryFunctionWrapperForRayTracing(decl, entryFuncInstr);
