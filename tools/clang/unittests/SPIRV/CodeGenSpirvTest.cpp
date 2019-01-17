@@ -1772,4 +1772,7 @@ TEST_F(FileTest, RayTracingNVMiss) {
 TEST_F(FileTest, RayTracingNVCallable) {
   runFileTest("raytracing.nv.callable.hlsl");
 }
+TEST_F(FileTest, RayTracingNVLibrary) {
+  runFileTest("raytracing.nv.library.hlsl");
+}
 } // namespace
