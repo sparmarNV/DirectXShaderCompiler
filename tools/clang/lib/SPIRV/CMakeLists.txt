@@ -10,6 +10,7 @@ add_clang_library(clangSPIRV
   DeclResultIdMapper.cpp
   EmitSpirvAction.cpp
   EmitVisitor.cpp
+  ExecutionModel.cpp
   FeatureManager.cpp
   GlPerVertex.cpp
   InitListHandler.cpp
@@ -19,7 +20,6 @@ add_clang_library(clangSPIRV
   SpirvBuilder.cpp
   SpirvContext.cpp
   SpirvEmitter.cpp
-  SpirvExecutionModel.cpp
   SpirvFunction.cpp
   SpirvInstruction.cpp
   SpirvModule.cpp

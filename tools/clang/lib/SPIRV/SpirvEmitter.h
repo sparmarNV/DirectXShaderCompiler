@@ -36,7 +36,7 @@
 
 #include "DeclResultIdMapper.h"
 #include "SpirvEvalInfo.h"
-#include "SpirvExecutionModel.h" 
+#include "ExecutionModel.h"
 
 namespace clang {
 namespace spirv {
@@ -988,7 +988,7 @@ private:
   // functions
   struct FunctionInfo {
   public:
-    const SpirvExecutionModel *spvExecModel;
+    const ExecutionModel *spvExecModel;
     const DeclaratorDecl *funcDecl;
     SpirvFunction *entryFunction;
     bool isEntryFunction;
@@ -996,7 +996,7 @@ private:
     FunctionInfo()
         : spvExecModel(nullptr), funcDecl(nullptr), entryFunction(nullptr),
           isEntryFunction(false) {}
-    FunctionInfo(const SpirvExecutionModel *em, const DeclaratorDecl *fDecl,
+    FunctionInfo(const ExecutionModel *em, const DeclaratorDecl *fDecl,
                  SpirvFunction *entryFunc, bool isEntryFunc)
         : spvExecModel(em), funcDecl(fDecl), entryFunction(entryFunc),
           isEntryFunction(isEntryFunc) {}
@@ -1018,7 +1018,7 @@ private:
   llvm::SetVector<const FunctionInfo *> workQueue;
 
   // Current Spirv Execution Model associated with below entryFunction
-  const SpirvExecutionModel *spvExecModel;
+  const ExecutionModel *spvExecModel;
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.
   SpirvFunction *entryFunction;

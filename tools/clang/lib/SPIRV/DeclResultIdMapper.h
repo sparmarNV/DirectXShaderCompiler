@@ -27,7 +27,7 @@
 
 #include "GlPerVertex.h"
 #include "SpirvEvalInfo.h"
-#include "SpirvExecutionModel.h" 
+#include "ExecutionModel.h"
 
 namespace clang {
 namespace spirv {
@@ -265,7 +265,7 @@ public:
                             SpirvBuilder &spirvBuilder, SpirvEmitter &emitter,
                             FeatureManager &features,
                             const SpirvCodeGenOptions &spirvOptions,
-                            const SpirvExecutionModel *em);
+                            const ExecutionModel *em);
 
   /// \brief Returns the SPIR-V builtin variable.
   SpirvVariable *getBuiltinVar(spv::BuiltIn builtIn, QualType type, SourceLocation);
@@ -364,7 +364,7 @@ public:
   void setEntryFunction(SpirvFunction *fn) { entryFunction = fn; }
 
   /// \brief Sets the spirv execution model
-  void setSpvExecutionModel(const SpirvExecutionModel *em) {
+  void setSpvExecutionModel(const ExecutionModel *em) {
     glPerVertex.setSpvExecutionModel(em);
     spvExecModel = em;
   }
@@ -652,7 +652,7 @@ private:
   SpirvContext &spvContext;
   DiagnosticsEngine &diags;
   SpirvFunction *entryFunction;
-  const SpirvExecutionModel *spvExecModel;
+  const ExecutionModel *spvExecModel;
 
   /// Mapping of all Clang AST decls to their instruction pointers.
   llvm::DenseMap<const ValueDecl *, DeclSpirvInfo> astDecls;
@@ -766,7 +766,7 @@ DeclResultIdMapper::DeclResultIdMapper(const hlsl::ShaderModel &model,
                                        SpirvEmitter &emitter,
                                        FeatureManager &features,
                                        const SpirvCodeGenOptions &options,
-                                       const SpirvExecutionModel *execModel)
+                                       const ExecutionModel *execModel)
     : shaderModel(model), spvBuilder(spirvBuilder), theEmitter(emitter),
       spirvOptions(options), astContext(context), spvContext(spirvContext),
       diags(context.getDiagnostics()), entryFunction(nullptr),

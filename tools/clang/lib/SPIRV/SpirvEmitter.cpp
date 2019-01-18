@@ -482,7 +482,7 @@ SpirvEmitter::SpirvEmitter(CompilerInstance &ci)
       entryFunctionName(ci.getCodeGenOpts().HLSLEntryFunction),
       shaderModel(*hlsl::ShaderModel::GetByName(
           ci.getCodeGenOpts().HLSLProfile.c_str())),
-      spvExecModel(SpirvExecutionModel::GetByShaderKind(shaderModel.GetKind())),
+      spvExecModel(ExecutionModel::GetByShaderKind(shaderModel.GetKind())),
       spvContext(), featureManager(diags, spirvOptions),
       spvBuilder(astContext, spvContext, &featureManager, spirvOptions),
       declIdMapper(shaderModel, astContext, spvContext, spvBuilder, *this,
@@ -570,8 +570,8 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
           // If we are compiling as a library then add everything that has a
           // ShaderAttr
           FunctionInfo *entryInfo = new FunctionInfo(
-              SpirvExecutionModel::GetByStageName(shaderAttr->getStage()),
-              funcDecl, /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
+              ExecutionModel::GetByStageName(shaderAttr->getStage()), funcDecl,
+              /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
 
           functionInfoMap[funcDecl] = entryInfo;
           workQueue.insert(entryInfo);
@@ -580,8 +580,8 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
       } else {
         if (funcDecl->getName() == entryFunctionName) {
           FunctionInfo *entryInfo = new FunctionInfo(
-              SpirvExecutionModel::GetByShaderKind(shaderModel.GetKind()),
-              funcDecl, /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
+              ExecutionModel::GetByShaderKind(shaderModel.GetKind()), funcDecl,
+              /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
 
           functionInfoMap[funcDecl] = entryInfo;
           workQueue.insert(entryInfo);

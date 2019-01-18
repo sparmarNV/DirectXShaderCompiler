@@ -60,7 +60,7 @@ inline bool hasGSPrimitiveTypeQualifier(const DeclaratorDecl *decl) {
 }
 } // anonymous namespace
 
-GlPerVertex::GlPerVertex(const SpirvExecutionModel *em, ASTContext &context,
+GlPerVertex::GlPerVertex(const ExecutionModel *em, ASTContext &context,
                          SpirvContext &spirvContext, SpirvBuilder &spirvBuilder)
     : spvExecModel(em), astContext(context), spvContext(spirvContext),
       spvBuilder(spirvBuilder), inClipVar(nullptr), inCullVar(nullptr),
