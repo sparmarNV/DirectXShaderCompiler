@@ -984,15 +984,23 @@ private:
   const llvm::StringRef entryFunctionName;
   const hlsl::ShaderModel shaderModel;
 
-  // Maintains record of all entry functions with execution model
-  // and reachable functions
+  // Structure to maintain record of all entry functions and any reachable
+  // functions
   struct FunctionInfo {
+  public:
     const SpirvExecutionModel *spvExecModel;
     const DeclaratorDecl *funcDecl;
     SpirvFunction *entryFunction;
     bool isEntryFunction;
+
+    FunctionInfo()
+        : spvExecModel(nullptr), funcDecl(nullptr), entryFunction(nullptr),
+          isEntryFunction(false) {}
+    FunctionInfo(const SpirvExecutionModel *em, const DeclaratorDecl *fDecl,
+                 SpirvFunction *entryFunc, bool isEntryFunc)
+        : spvExecModel(em), funcDecl(fDecl), entryFunction(entryFunc),
+          isEntryFunction(isEntryFunc) {}
   };
-  const SpirvExecutionModel *spvExecModel;
 
   SpirvContext spvContext;
   FeatureManager featureManager;
@@ -1009,6 +1017,8 @@ private:
   /// for finding the next function to translate. So we need SetVector here.
   llvm::SetVector<const FunctionInfo *> workQueue;
 
+  // Current Spirv Execution Model associated with below entryFunction
+  const SpirvExecutionModel *spvExecModel;
   /// <result-id> for the entry function. Initially it is zero and will be reset
   /// when starting to translate the entry function.
   SpirvFunction *entryFunction;

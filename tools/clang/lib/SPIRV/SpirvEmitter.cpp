@@ -569,12 +569,9 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
         if (const auto *shaderAttr = funcDecl->getAttr<HLSLShaderAttr>()) {
           // If we are compiling as a library then add everything that has a
           // ShaderAttr
-          FunctionInfo *entryInfo = new FunctionInfo();
-          entryInfo->spvExecModel =
-              SpirvExecutionModel::GetByStageName(shaderAttr->getStage());
-          entryInfo->funcDecl = funcDecl;
-          entryInfo->entryFunction = nullptr;
-          entryInfo->isEntryFunction = true;
+          FunctionInfo *entryInfo = new FunctionInfo(
+              SpirvExecutionModel::GetByStageName(shaderAttr->getStage()),
+              funcDecl, /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
 
           functionInfoMap[funcDecl] = entryInfo;
           workQueue.insert(entryInfo);
@@ -582,12 +579,9 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
         }
       } else {
         if (funcDecl->getName() == entryFunctionName) {
-          FunctionInfo *entryInfo = new FunctionInfo();
-          entryInfo->spvExecModel =
-              SpirvExecutionModel::GetByShaderKind(shaderModel.GetKind());
-          entryInfo->funcDecl = funcDecl;
-          entryInfo->entryFunction = nullptr;
-          entryInfo->isEntryFunction = true;
+          FunctionInfo *entryInfo = new FunctionInfo(
+              SpirvExecutionModel::GetByShaderKind(shaderModel.GetKind()),
+              funcDecl, /*entryFunction*/ nullptr, /*isEntryFunc*/ true);
 
           functionInfoMap[funcDecl] = entryInfo;
           workQueue.insert(entryInfo);
@@ -603,11 +597,11 @@ void SpirvEmitter::HandleTranslationUnit(ASTContext &context) {
   // The queue can grow in the meanwhile; so need to keep evaluating
   // workQueue.size().
   for (uint32_t i = 0; i < workQueue.size(); ++i) {
-    const FunctionInfo *curEntryOrFunc = workQueue[i];
-    declIdMapper.setSpvExecutionModel(curEntryOrFunc->spvExecModel);
-    spvExecModel = curEntryOrFunc->spvExecModel;
-    entryFunction = curEntryOrFunc->entryFunction;
-    doDecl(curEntryOrFunc->funcDecl);
+    const FunctionInfo *curEntryOrCallee = workQueue[i];
+    declIdMapper.setSpvExecutionModel(curEntryOrCallee->spvExecModel);
+    spvExecModel = curEntryOrCallee->spvExecModel;
+    entryFunction = curEntryOrCallee->entryFunction;
+    doDecl(curEntryOrCallee->funcDecl);
   }
 
   if (context.getDiagnostics().hasErrorOccurred())
@@ -2061,11 +2055,8 @@ SpirvInstruction *SpirvEmitter::processCall(const CallExpr *callExpr) {
 
   // Push the callee into the work queue if it is not there.
   if (functionInfoMap.find(callee) == functionInfoMap.end()) {
-    FunctionInfo *calleeInfo = new FunctionInfo;
-    calleeInfo->spvExecModel = spvExecModel;
-    calleeInfo->funcDecl = callee;
-    calleeInfo->entryFunction = nullptr;
-    calleeInfo->isEntryFunction = false;
+    FunctionInfo *calleeInfo = new FunctionInfo(
+        spvExecModel, callee, /*entryFunction*/ nullptr, /*isEntryFunc*/ false);
     functionInfoMap[callee] = calleeInfo;
     workQueue.insert(calleeInfo);
   }
