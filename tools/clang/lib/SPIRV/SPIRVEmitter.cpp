@@ -6629,12 +6629,12 @@ void SPIRVEmitter::processRayCall(const CallExpr *callExpr)
         callDataTypeId = typeId;
         if (iter == callDataResultMap.end()) {
           // Declare the callableData location decoration now
-          callDataLocation = payloadResultMap.size();
+          callDataLocation = callDataResultMap.size();
           uint32_t varId = declIdMapper.createRayTracingStageVar(spv::StorageClass::CallableDataNV,
             var_decl, "callableDataGlobal_" + std::to_string(callDataLocation));
           callDataResultId = varId;
           callDataResultMap[typeId] = callDataResultId;
-          payloadLocationMap[typeId] = callDataLocation;
+          callDataLocationMap[typeId] = callDataLocation;
           theBuilder.decorateLocation(varId, callDataLocation);
         } else {
           // We have this payload
@@ -6716,13 +6716,13 @@ uint32_t SPIRVEmitter::processRayIntrinsic(const CallExpr *callExpr,
     builtin = spv::BuiltIn::WorldToObjectNV;
     break;
   case hlsl::IntrinsicOp::IOP_InstanceIndex:
-    builtin = spv::BuiltIn::InstanceCustomIndexNV;
+    builtin = spv::BuiltIn::InstanceId;
     break;
   case hlsl::IntrinsicOp::IOP_PrimitiveIndex:
     builtin = spv::BuiltIn::PrimitiveId;
     break;
   case hlsl::IntrinsicOp::IOP_InstanceID:
-    builtin = spv::BuiltIn::InstanceId;
+    builtin = spv::BuiltIn::InstanceCustomIndexNV;
     break;
   case hlsl::IntrinsicOp::IOP_RayFlags:
     builtin = spv::BuiltIn::IncomingRayFlagsNV;
@@ -10347,7 +10347,7 @@ bool SPIRVEmitter::emitEntryFunctionWrapper(const FunctionDecl *decl,
   //    of the main entry point function is done.
   if (currentShaderModel->IsHS()) {
     // Create stage output variables out of the return type.
-    if (!declIdMapper.createHSStageOutputVar(decl, numOutputControlPoints,
+    if (!declIdMapper.createStageOutputVar(decl, numOutputControlPoints,
                                              outputControlPointIdVal, retVal))
       return false;
     if (!processHSEntryPointOutputAndPCF(

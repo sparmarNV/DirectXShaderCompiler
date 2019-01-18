@@ -282,7 +282,7 @@ public:
   bool createStageOutputVar(const DeclaratorDecl *decl, uint32_t storedValue,
                             bool forPCF);
   /// \brief Overload for handling HS control point stage ouput variable.
-  bool createHSStageOutputVar(const DeclaratorDecl *decl, uint32_t arraySize,
+  bool createStageOutputVar(const DeclaratorDecl *decl, uint32_t arraySize,
                             uint32_t invocationId, uint32_t storedValue);
 
   /// \brief Creates the stage input variables by parsing the semantics attached
@@ -580,13 +580,6 @@ private:
                        const llvm::StringRef namePrefix,
                        llvm::Optional<uint32_t> invocationId, uint32_t *value,
                        bool noWriteBack, SemanticInfo *inheritSemantic);
-
-  bool createNonStructureStageVar(const hlsl::SigPoint *sigPoint, const NamedDecl *decl,
-                       bool asInput, QualType asType, uint32_t arraySize,
-                       const llvm::StringRef namePrefix,
-                       llvm::Optional<uint32_t> invocationId, uint32_t *value,
-                       bool noWriteBack, SemanticInfo *inheritSemantic);
-
 
 
   uint32_t createSpirvRayTracingStageVar(StageVar *, const NamedDecl *decl,
