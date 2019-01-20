@@ -371,7 +371,7 @@ public:
 
   /// Raytracing specific functions
   /// \brief Handle specific implicit declarations present only in raytracing stages
-  void DeclResultIdMapper::createRayTracingImplicitVar(const VarDecl *varDecl);
+  void createRayTracingImplicitVar(const VarDecl *varDecl);
 
 private:
   /// The struct containing SPIR-V information of a AST Decl.
