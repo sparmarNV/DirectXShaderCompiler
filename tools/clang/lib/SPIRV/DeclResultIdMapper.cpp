@@ -230,7 +230,7 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
     type = hlsl::GetHLSLResourceResultType(type);
 
   const auto *sigPoint =
-      deduceSigPoint(decl, /*asInput=*/false, currentShaderModel->GetKind(), forPCF);
+      deduceSigPoint(decl, /*asInput=*/false, spvExecModel->GetShaderKind(), forPCF);
 
   // HS output variables are created using the other overload. For the rest,
   // none of them should be created as arrays.
@@ -244,7 +244,7 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
   // Write back of stage output variables in GS is manually controlled by
   // .Append() intrinsic method, implemented in writeBackOutputStream(). So
   // ignoreValue should be set to true for GS.
-  const bool noWriteBack = storedValue == 0 || currentShaderModel->IsGS();
+  const bool noWriteBack = storedValue == 0 || spvExecModel->IsGS();
 
   return createStageVars(sigPoint, decl, /*asInput=*/false, type,
                          /*arraySize=*/0, "out.var", llvm::None, &storedValue,
@@ -255,7 +255,7 @@ bool DeclResultIdMapper::createStageOutputVar(const DeclaratorDecl *decl,
                                               uint32_t arraySize,
                                               uint32_t invocationId,
                                               uint32_t storedValue) {
-  assert(currentShaderModel->IsHS());
+  assert(spvExecModel->IsHS());
 
   QualType type = getTypeOrFnRetType(decl);
 
@@ -291,7 +291,7 @@ bool DeclResultIdMapper::createStageInputVar(const ParmVarDecl *paramDecl,
   }
 
   const auto *sigPoint = deduceSigPoint(paramDecl, /*asInput=*/true,
-                                        currentShaderModel->GetKind(), forPCF);
+                                        spvExecModel->GetShaderKind(), forPCF);
 
   SemanticInfo inheritSemantic = {};
 
@@ -1104,8 +1104,8 @@ bool DeclResultIdMapper::finalizeStageIOLocations(bool forInput) {
   // likely. In order to avoid location mismatches between HS and DS, use
   // alphabetical ordering.
   if (spirvOptions.stageIoOrder == "alpha" ||
-      (!forInput && currentShaderModel->IsHS()) ||
-      (forInput && currentShaderModel->IsDS())) {
+      (!forInput && spvExecModel->IsHS()) ||
+      (forInput && spvExecModel->IsDS())) {
     // Sort stage input/output variables alphabetically
     std::sort(vars.begin(), vars.end(),
               [](const StageVar *a, const StageVar *b) {
@@ -1422,7 +1422,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
                                          SemanticInfo *inheritSemantic) {
   // invocationId should only be used for handling HS per-vertex output.
   if (invocationId.hasValue()) {
-    assert(currentShaderModel->IsHS() && arraySize != 0 && !asInput);
+    assert(spvExecModel->IsHS() && arraySize != 0 && !asInput);
   }
 
   assert(inheritSemantic);
@@ -1476,12 +1476,12 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
 
     // Error out when the given semantic is invalid in this shader model
     if (hlsl::SigPoint::GetInterpretation(semanticKind, sigPoint->GetKind(),
-                                          currentShaderModel->GetMajor(),
-                                          currentShaderModel->GetMinor()) ==
+                                          shaderModel.GetMajor(),
+                                          shaderModel.GetMinor()) ==
         hlsl::DXIL::SemanticInterpretationKind::NA) {
       emitError("invalid usage of semantic '%0' in shader profile %1",
                 decl->getLocation())
-          << semanticToUse->str << currentShaderModel->GetName();
+          << semanticToUse->str << shaderModel.GetName();
       return false;
     }
 
@@ -1606,7 +1606,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
       theBuilder.decoratePatch(varId);
 
     // Decorate with interpolation modes for pixel shader input variables
-    if (currentShaderModel->IsPS() && sigPoint->IsInput() &&
+    if (spvExecModel->IsPS() && sigPoint->IsInput() &&
         // BaryCoord*AMD buitins already encode the interpolation mode.
         semanticKind != hlsl::Semantic::Kind::Barycentrics)
       decoratePSInterpolationMode(decl, type, varId);
@@ -1939,7 +1939,7 @@ bool DeclResultIdMapper::createStageVars(const hlsl::SigPoint *sigPoint,
 
 bool DeclResultIdMapper::writeBackOutputStream(const NamedDecl *decl,
                                                QualType type, uint32_t value) {
-  assert(currentShaderModel->IsGS()); // Only for GS use
+  assert(spvExecModel->IsGS()); // Only for GS use
 
   if (hlsl::IsHLSLStreamOutputType(type))
     type = hlsl::GetHLSLResourceResultType(type);
@@ -2035,7 +2035,7 @@ uint32_t DeclResultIdMapper::invertYIfRequested(uint32_t position) {
 
 uint32_t DeclResultIdMapper::invertWIfRequested(uint32_t position) {
   // Reciprocate SV_Position.w if requested
-  if (spirvOptions.invertW && currentShaderModel->IsPS()) {
+  if (spirvOptions.invertW && spvExecModel->IsPS()) {
     const auto f32Type = theBuilder.getFloat32Type();
     const auto v4f32Type = theBuilder.getVecType(f32Type, 4);
     const auto oldW = theBuilder.createCompositeExtract(f32Type, position, {3});
@@ -2144,7 +2144,7 @@ uint32_t DeclResultIdMapper::getBuiltinVar(spv::BuiltIn builtIn) {
 
   const hlsl::SigPoint *sigPoint =
       hlsl::SigPoint::GetSigPoint(hlsl::SigPointFromInputQual(
-          hlsl::DxilParamInputQual::In, currentShaderModel->GetKind(),
+          hlsl::DxilParamInputQual::In, spvExecModel->GetShaderKind(),
           /*isPatchConstant=*/false));
 
   StageVar stageVar(sigPoint, /*semaInfo=*/{}, /*builtinAttr=*/nullptr, type,
@@ -2595,7 +2595,7 @@ uint32_t DeclResultIdMapper::createSpirvStageVar(StageVar *stageVar,
 bool DeclResultIdMapper::validateVKAttributes(const NamedDecl *decl) {
   bool success = true;
   if (const auto *idxAttr = decl->getAttr<VKIndexAttr>()) {
-    if (!currentShaderModel->IsPS()) {
+    if (!spvExecModel->IsPS()) {
       emitError("vk::index only allowed in pixel shader",
                 idxAttr->getLocation());
       success = false;

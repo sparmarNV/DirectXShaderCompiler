@@ -19,6 +19,7 @@
 #include "llvm/ADT/SmallVector.h"
 
 #include "TypeTranslator.h"
+#include "SpirvExecutionModel.h"
 
 namespace clang {
 namespace spirv {
@@ -44,7 +45,7 @@ namespace spirv {
 /// array for ClipDistance builtin.
 class GlPerVertex {
 public:
-  GlPerVertex(const hlsl::ShaderModel &sm, ASTContext &context,
+  GlPerVertex(const SpirvExecutionModel *em, ASTContext &context,
               ModuleBuilder &builder, TypeTranslator &translator);
 
   /// Records a declaration of SV_ClipDistance/SV_CullDistance so later
@@ -91,6 +92,10 @@ public:
                    uint32_t semanticIndex, llvm::Optional<uint32_t> invocation,
                    uint32_t *value, bool noWriteBack);
 
+  void setSpvExecutionModel(const SpirvExecutionModel *em) {
+    spvExecModel = em;
+  }
+
 private:
   template <unsigned N>
   DiagnosticBuilder emitError(const char (&message)[N], SourceLocation loc) {
@@ -131,7 +136,7 @@ private:
   using SemanticIndexToTypeMap = llvm::DenseMap<uint32_t, QualType>;
   using SemanticIndexToArrayOffsetMap = llvm::DenseMap<uint32_t, uint32_t>;
 
-  const hlsl::ShaderModel &shaderModel;
+  const SpirvExecutionModel *spvExecModel;
   ASTContext &astContext;
   ModuleBuilder &theBuilder;
 

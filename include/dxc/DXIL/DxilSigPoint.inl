@@ -37,18 +37,6 @@ namespace hlsl {
   ROW(PSIn,        Invalid, Pixel,         Vertex,         Input) \
   ROW(PSOut,       Invalid, Pixel,         Target,         Output) \
   ROW(CSIn,        Invalid, Compute,       None,           Invalid) \
-  ROW(RGenIn,      Invalid, RayGeneration, None,           Input) \
-  ROW(ISecIn,      Invalid, Intersection,  None,           Input) \
-  ROW(AHitIn,      Invalid, AnyHit,        None,           Input) \
-  ROW(CHitIn,      Invalid, ClosestHit,    None,           Input) \
-  ROW(MissIn,      Invalid, Miss,          None,           Input) \
-  ROW(CallableIn,  Invalid, Callable,      None,           Input) \
-  ROW(RGenOut,     Invalid, RayGeneration, None,           Output) \
-  ROW(ISecOut,     Invalid, Intersection,  None,           Output) \
-  ROW(AHitOut,     Invalid, AnyHit,        None,           Output) \
-  ROW(CHitOut,     Invalid, ClosestHit,    None,           Output) \
-  ROW(MissOut,     Invalid, Miss,          None,           Output) \
-  ROW(CallableOut, Invalid, Callable,      None,           Output) \
   ROW(Invalid,     Invalid, Invalid,       Invalid,        Invalid)
 // SIGPOINT-TABLE:END
 
@@ -61,40 +49,38 @@ const SigPoint SigPoint::ms_SigPoints[kNumSigPointRecords] = {
 
 // <py::lines('INTERPRETATION-TABLE')>hctdb_instrhelp.get_interpretation_table()</py>
 // INTERPRETATION-TABLE:BEGIN
-//   Semantic,                VSIn,         VSOut,  PCIn,         HSIn,         HSCPIn, HSCPOut, PCOut,      DSIn,         DSCPIn, DSOut,  GSVIn,  GSIn,         GSOut,  PSIn,          PSOut,         CSIn,     RGenIn, ISecIn, AHitIn, CHitIn, MissIn, CallableIn, RGenOut, ISecOut, AHitOut, CHitOut, MissOut, CallableOut
+//   Semantic,                VSIn,         VSOut,  PCIn,         HSIn,         HSCPIn, HSCPOut, PCOut,      DSIn,         DSCPIn, DSOut,  GSVIn,  GSIn,         GSOut,  PSIn,          PSOut,         CSIn,    
 #define DO_INTERPRETATION_TABLE(ROW) \
-  ROW(Arbitrary,              Arb,          Arb,    NA,           NA,           Arb,    Arb,     Arb,        Arb,          Arb,    Arb,    Arb,    NA,           Arb,    Arb,           NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(VertexID,               SV,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(InstanceID,             SV,           Arb,    NA,           NA,           Arb,    Arb,     NA,         NA,           Arb,    Arb,    Arb,    NA,           Arb,    Arb,           NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(Position,               Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(RenderTargetArrayIndex, Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(ViewPortArrayIndex,     Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(ClipDistance,           Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(CullDistance,           Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(OutputControlPointID,   NA,           NA,     NA,           NotInSig,     NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(DomainLocation,         NA,           NA,     NA,           NA,           NA,     NA,      NA,         NotInSig,     NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(PrimitiveID,            NA,           NA,     NotInSig,     NotInSig,     NA,     NA,      NA,         NotInSig,     NA,     NA,     NA,     Shadow,       SGV,    SGV,           NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(GSInstanceID,           NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NotInSig,     NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(SampleIndex,            NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     Shadow _41,    NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(IsFrontFace,            NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           SGV,    SGV,           NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(Coverage,               NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotInSig _50,  NotPacked _41, NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(InnerCoverage,          NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotInSig _50,  NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(Target,                 NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            Target,        NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(Depth,                  NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked,     NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(DepthLessEqual,         NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(DepthGreaterEqual,      NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(StencilRef,             NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(DispatchThreadID,       NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig, NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(GroupID,                NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig, NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(GroupIndex,             NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig, NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(GroupThreadID,          NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig, NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(TessFactor,             NA,           NA,     NA,           NA,           NA,     NA,      TessFactor, TessFactor,   NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(InsideTessFactor,       NA,           NA,     NA,           NA,           NA,     NA,      TessFactor, TessFactor,   NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(ViewID,                 NotInSig _61, NA,     NotInSig _61, NotInSig _61, NA,     NA,      NA,         NotInSig _61, NA,     NA,     NA,     NotInSig _61, NA,     NotInSig _61,  NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(Barycentrics,           NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotPacked _61, NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(ShadingRate,            NA,           SV _64, NA,           NA,           SV _64, SV _64,  NA,         NA,           SV _64, SV _64, SV _64, NA,           SV _64, SV _64,        NA,            NA,       NA,     NA,     NA,     NA,     NA,     NA,         NA,      NA,      NA,      NA,      NA,      NA) \
-  ROW(RayPayload,             NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       SV,     SV,     SV,     SV,     SV,     SV,         SV,      SV,      SV,      SV,      SV,      SV) \
-  ROW(RayAttributes,          NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA,       SV,     SV,     SV,     SV,     SV,     SV,         SV,      SV,      SV,      SV,      SV,      SV)
+  ROW(Arbitrary,              Arb,          Arb,    NA,           NA,           Arb,    Arb,     Arb,        Arb,          Arb,    Arb,    Arb,    NA,           Arb,    Arb,           NA,            NA) \
+  ROW(VertexID,               SV,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA) \
+  ROW(InstanceID,             SV,           Arb,    NA,           NA,           Arb,    Arb,     NA,         NA,           Arb,    Arb,    Arb,    NA,           Arb,    Arb,           NA,            NA) \
+  ROW(Position,               Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA) \
+  ROW(RenderTargetArrayIndex, Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA) \
+  ROW(ViewPortArrayIndex,     Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA) \
+  ROW(ClipDistance,           Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA) \
+  ROW(CullDistance,           Arb,          SV,     NA,           NA,           SV,     SV,      Arb,        Arb,          SV,     SV,     SV,     NA,           SV,     SV,            NA,            NA) \
+  ROW(OutputControlPointID,   NA,           NA,     NA,           NotInSig,     NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA) \
+  ROW(DomainLocation,         NA,           NA,     NA,           NA,           NA,     NA,      NA,         NotInSig,     NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA) \
+  ROW(PrimitiveID,            NA,           NA,     NotInSig,     NotInSig,     NA,     NA,      NA,         NotInSig,     NA,     NA,     NA,     Shadow,       SGV,    SGV,           NA,            NA) \
+  ROW(GSInstanceID,           NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NotInSig,     NA,     NA,            NA,            NA) \
+  ROW(SampleIndex,            NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     Shadow _41,    NA,            NA) \
+  ROW(IsFrontFace,            NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           SGV,    SGV,           NA,            NA) \
+  ROW(Coverage,               NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotInSig _50,  NotPacked _41, NA) \
+  ROW(InnerCoverage,          NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotInSig _50,  NA,            NA) \
+  ROW(Target,                 NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            Target,        NA) \
+  ROW(Depth,                  NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked,     NA) \
+  ROW(DepthLessEqual,         NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA) \
+  ROW(DepthGreaterEqual,      NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA) \
+  ROW(StencilRef,             NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NotPacked _50, NA) \
+  ROW(DispatchThreadID,       NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig) \
+  ROW(GroupID,                NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig) \
+  ROW(GroupIndex,             NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig) \
+  ROW(GroupThreadID,          NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NA,            NA,            NotInSig) \
+  ROW(TessFactor,             NA,           NA,     NA,           NA,           NA,     NA,      TessFactor, TessFactor,   NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA) \
+  ROW(InsideTessFactor,       NA,           NA,     NA,           NA,           NA,     NA,      TessFactor, TessFactor,   NA,     NA,     NA,     NA,           NA,     NA,            NA,            NA) \
+  ROW(ViewID,                 NotInSig _61, NA,     NotInSig _61, NotInSig _61, NA,     NA,      NA,         NotInSig _61, NA,     NA,     NA,     NotInSig _61, NA,     NotInSig _61,  NA,            NA) \
+  ROW(Barycentrics,           NA,           NA,     NA,           NA,           NA,     NA,      NA,         NA,           NA,     NA,     NA,     NA,           NA,     NotPacked _61, NA,            NA) \
+  ROW(ShadingRate,            NA,           SV _64, NA,           NA,           SV _64, SV _64,  NA,         NA,           SV _64, SV _64, SV _64, NA,           SV _64, SV _64,        NA,            NA) \
 // INTERPRETATION-TABLE:END
 
 const VersionedSemanticInterpretation SigPoint::ms_SemanticInterpretationTable[(unsigned)DXIL::SemanticKind::Invalid][(unsigned)SigPoint::Kind::Invalid] = {
@@ -102,7 +88,7 @@ const VersionedSemanticInterpretation SigPoint::ms_SemanticInterpretationTable[(
 #define _50 ,5,0
 #define _61 ,6,1
 #define _64 ,6,4
-#define DO_ROW(SEM, VSIn, VSOut, PCIn, HSIn, HSCPIn, HSCPOut, PCOut, DSIn, DSCPIn, DSOut, GSVIn, GSIn, GSOut, PSIn, PSOut, CSIn, RGenIn, ISecIn, AHitIn, CHitIn, MissIn, CallableIn, RGenOut, ISecOut, AHitOut, CHitOut, MissOut, CallableOut) \
+#define DO_ROW(SEM, VSIn, VSOut, PCIn, HSIn, HSCPIn, HSCPOut, PCOut, DSIn, DSCPIn, DSOut, GSVIn, GSIn, GSOut, PSIn, PSOut, CSIn) \
   { VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::VSIn), \
     VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::VSOut), \
     VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::PCIn), \
@@ -119,18 +105,6 @@ const VersionedSemanticInterpretation SigPoint::ms_SemanticInterpretationTable[(
     VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::PSIn), \
     VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::PSOut), \
     VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::CSIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::RGenIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::ISecIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::AHitIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::CHitIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::MissIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::CallableIn), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::RGenOut), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::ISecOut), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::AHitOut), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::CHitOut), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::MissOut), \
-    VersionedSemanticInterpretation(DXIL::SemanticInterpretationKind::CallableOut), \
   },
   DO_INTERPRETATION_TABLE(DO_ROW)
 #undef DO_ROW
@@ -238,54 +212,6 @@ DXIL::SigPointKind SigPoint::GetKind(DXIL::ShaderKind shaderKind, DXIL::Signatur
   case DXIL::ShaderKind::Compute:
     switch (sigKind) {
     case DXIL::SignatureKind::Input: return DXIL::SigPointKind::CSIn;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::RayGeneration:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::RGenIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::RGenOut;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::Intersection:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::ISecIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::ISecOut;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::AnyHit:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::AHitIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::AHitOut;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::ClosestHit:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::CHitIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::CHitOut;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::Miss:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::MissIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::MissOut;
-    default:
-      break;
-    }
-    break;
-  case DXIL::ShaderKind::Callable:
-  switch (sigKind) {
-    case DXIL::SignatureKind::Input: return DXIL::SigPointKind::CallableIn;
-    case DXIL::SignatureKind::Output: return DXIL::SigPointKind::CallableOut;
     default:
       break;
     }

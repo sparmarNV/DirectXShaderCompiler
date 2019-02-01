@@ -18,7 +18,7 @@ namespace clang {
 namespace spirv {
 namespace testOptions {
 
-std::string inputDataDir = "";
+std::string inputDataDir = "E:\\FinalV1\\hlsl.bin\\Debug\\bin";
 
 } // namespace testOptions
 } // namespace spirv

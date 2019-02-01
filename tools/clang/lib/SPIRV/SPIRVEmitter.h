@@ -35,6 +35,7 @@
 #include "DeclResultIdMapper.h"
 #include "SpirvEvalInfo.h"
 #include "TypeTranslator.h"
+#include "SpirvExecutionModel.h"
 
 namespace clang {
 namespace spirv {
@@ -948,7 +949,16 @@ private:
   /// Entry function name and shader stage. Both of them are derived from the
   /// command line and should be const.
   const llvm::StringRef entryFunctionName;
-  const hlsl::ShaderModel *currentShaderModel;
+  const hlsl::ShaderModel shaderModel;
+
+  // Maintains record of all entry functions with execution model
+  // and reachable functions
+  struct FunctionEntryInfo {
+    const SpirvExecutionModel *spvExecModel;
+    uint32_t entryFunctionId;
+    const DeclaratorDecl *funcDecl;
+  };
+  const SpirvExecutionModel *spvExecModel;
 
   SPIRVContext theContext;
   FeatureManager featureManager;
@@ -960,13 +970,6 @@ private:
   /// this queue will persist to avoid duplicated translations. And we'd like
   /// a deterministic order of iterating the queue for finding the next decl
   /// to translate. So we need SetVector here.
-  struct FunctionEntryInfo {
-    const hlsl::ShaderModel *hlslModel;
-    spv::ExecutionModel executionModel;
-    uint32_t entryFunctionId;
-    const DeclaratorDecl *funcDecl;
-  };
-  const FunctionEntryInfo *currentEntry;
 
   llvm::SmallVector<FunctionEntryInfo, 8> workQueue;
   llvm::DenseMap<llvm::StringRef, FunctionEntryInfo> entryPoints;

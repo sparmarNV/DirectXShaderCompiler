@@ -28,6 +28,7 @@
 #include "GlPerVertex.h"
 #include "SpirvEvalInfo.h"
 #include "TypeTranslator.h"
+#include "SpirvExecutionModel.h"
 
 namespace clang {
 namespace spirv {
@@ -258,11 +259,12 @@ private:
 /// stage variables per Vulkan's requirements.
 class DeclResultIdMapper {
 public:
-  inline DeclResultIdMapper(const hlsl::ShaderModel *model, ASTContext &context,
+  inline DeclResultIdMapper(const hlsl::ShaderModel &model, ASTContext &context,
                             ModuleBuilder &builder, SPIRVEmitter &emitter,
                             TypeTranslator &translator,
                             FeatureManager &features,
-                            const SpirvCodeGenOptions &spirvOptions);
+                            const SpirvCodeGenOptions &spirvOptions,
+                            const SpirvExecutionModel *em);
 
   /// \brief Returns the <result-id> for a SPIR-V builtin variable.
   uint32_t getBuiltinVar(spv::BuiltIn builtIn);
@@ -359,8 +361,9 @@ public:
 
   /// \brief Sets the <result-id> of the entry function.
   void setEntryFunctionId(uint32_t id) { entryFunctionId = id; }
-  void setCurrentShaderModel(const hlsl::ShaderModel *sModel) {
-    currentShaderModel = sModel;
+  void setSpvExecutionModel(const SpirvExecutionModel *em) {
+    glPerVertex.setSpvExecutionModel(em);
+    spvExecModel = em;
   }
 
 private:
@@ -640,12 +643,13 @@ private:
   inline bool isInputStorageClass(const StageVar &v);
 
 private:
-  const hlsl::ShaderModel *currentShaderModel;
+  const hlsl::ShaderModel shaderModel;
   ModuleBuilder &theBuilder;
   SPIRVEmitter &theEmitter;
   const SpirvCodeGenOptions &spirvOptions;
   ASTContext &astContext;
   DiagnosticsEngine &diags;
+  const SpirvExecutionModel *spvExecModel;
 
   TypeTranslator &typeTranslator;
 
@@ -757,18 +761,18 @@ void CounterIdAliasPair::assign(const CounterIdAliasPair &srcPair,
 }
 
 DeclResultIdMapper::DeclResultIdMapper(
-    const hlsl::ShaderModel *model, ASTContext &context, ModuleBuilder &builder,
+    const hlsl::ShaderModel &model, ASTContext &context, ModuleBuilder &builder,
     SPIRVEmitter &emitter, TypeTranslator &translator, FeatureManager &features,
-    const SpirvCodeGenOptions &options)
-    : currentShaderModel(model), theBuilder(builder), theEmitter(emitter),
+    const SpirvCodeGenOptions &options, const SpirvExecutionModel *execModel)
+    : shaderModel(model), theBuilder(builder), theEmitter(emitter),
       spirvOptions(options), astContext(context),
       diags(context.getDiagnostics()), typeTranslator(translator),
-      entryFunctionId(0), needsLegalization(false),
-      glPerVertex(*model, context, builder, typeTranslator) {}
+      entryFunctionId(0), spvExecModel(execModel), needsLegalization(false),
+      glPerVertex(execModel, context, builder, typeTranslator) {}
 
 bool DeclResultIdMapper::decorateStageIOLocations() {
   // No locations to be assigned for raytracing stages
-  if (currentShaderModel->IsRay())
+  if (spvExecModel->IsRay())
     return true;
   // Try both input and output even if input location assignment failed
   return finalizeStageIOLocations(true) & finalizeStageIOLocations(false);
